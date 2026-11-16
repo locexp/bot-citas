@@ -99,8 +99,26 @@ Opciones: `--config selectores.json` (selectores CSS propios por dominio, ver
 5. Tiendas **Magento** (como supermercadosmas.com): precio `data-price-amount`, galería, enlaces `product-item-link`
 6. Heurísticas (`h1`, clases `price`/`precio`, imágenes)
 
+## Webs probadas (16/11/2026, desde un servidor en la nube)
+| Supermercado | Resultado | Notas |
+|---|---|---|
+| Alcampo (compraonline.alcampo.es) | ✅ Funciona | Productos y categorías |
+| Ahorramas (ahorramas.com) | ✅ Funciona | Productos y categorías |
+| Lidl (lidl.es) | ✅ Funciona | Productos y categorías |
+| Consum (tienda.consum.es) | ✅ Con «modo navegador» | Web con JavaScript; muchos productos no tienen descripción |
+| Mercadona (tienda.mercadona.es) | ⛔ No | Su `robots.txt` no permite bots; el bot lo respeta |
+| Supermercados MAS, Carrefour, Eroski | 🛡️ Bloqueado (Cloudflare) | Puede funcionar desde casa o el móvil |
+| Dia, El Corte Inglés | 🛡️ Bloqueado (Akamai) | Puede funcionar desde casa o el móvil |
+
+Las webs cambian a menudo: si alguna deja de funcionar, se puede ajustar con `selectores.json`.
+
+**Modo navegador:** necesita `pip install playwright && playwright install chromium`
+(en Termux no está disponible). Si ya tienes Chromium instalado, puedes indicar su ruta con
+`BOT_CHROMIUM=/ruta/a/chromium`.
+
 ## Webs con protección anti-bots
-Si una web responde con un reto de Cloudflare («Just a moment...»), el bot lo detecta y lo
+Si una web responde con un reto de Cloudflare («Just a moment...») o un bloqueo de Akamai
+(«Access Denied»), el bot lo detecta y lo
 avisa en lugar de devolver datos vacíos. Normalmente se soluciona ejecutándolo desde una
 conexión doméstica o móvil (opciones A y B). El bot no intenta saltarse esas protecciones.
 

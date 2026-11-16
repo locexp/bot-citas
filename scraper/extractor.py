@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field, asdict
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -236,6 +236,26 @@ def _desde_selectores(soup, p: Producto, sel: dict):
                 p.imagenes.append(src)
 
 
+_DESC_RE = re.compile(r"(^|[-_])(product-?)?(description|descripcion)$", re.I)
+_NO_DESC_RE = re.compile(r"promo|offer|oferta|popup|picto|modal|banner|badge|cookie", re.I)
+
+
+def _es_bloque_descripcion(tag) -> bool:
+    nombres = list(tag.get("class") or []) + ([tag["id"]] if tag.get("id") else [])
+    juntos = " ".join(nombres)
+    return (tag.name in ("div", "section", "p", "article")
+            and any(_DESC_RE.search(n) for n in nombres) and not _NO_DESC_RE.search(juntos))
+
+
+def clave_imagen(url: str) -> str:
+    """Identifica una foto ignorando el tamaño pedido (?sw=140, /300x300.jpg, /dw/image/v2/...)."""
+    ruta = urlparse(url)._replace(query="", fragment="").geturl()
+    ruta = re.sub(r"/dw/image/v2/[^/]+/", "/", ruta)            # Salesforce (Ahorramas...)
+    ruta = re.sub(r"[_/-]?\d{2,4}x\d{2,4}(?=[._/-]|$)", "", ruta)  # 500x500, _300x300
+    ruta = re.sub(r"/(large|medium|small|thumb|thumbnail|zoom)/", "/", ruta, flags=re.I)
+    return ruta.lower()
+
+
 def extraer_producto(html: str, url: str, selectores: dict | None = None) -> Producto:
     soup = BeautifulSoup(html, "lxml")
     p = Producto(url=url)
@@ -247,23 +267,43 @@ def extraer_producto(html: str, url: str, selectores: dict | None = None) -> Pro
     _desde_magento(soup, p)
     _desde_heuristicas(soup, p)
 
+    # Descartar descripciones que en realidad son el "slug" de la URL o repiten el título
+    if p.descripcion and (re.fullmatch(r"[\w-]+", p.descripcion) or p.descripcion == p.titulo):
+        p.descripcion = None
+    if not p.descripcion:
+        for el in soup.find_all(_es_bloque_descripcion):
+            txt = _limpiar(el.get_text(" "))
+            if txt and 30 <= len(txt) <= 3000:
+                p.descripcion = txt
+                break
     p.moneda = p.moneda or detectar_moneda(p.precio_texto)
-    # Normalizar URLs de imágenes y quitar duplicados
+    # Normalizar URLs de imágenes y quitar duplicados (misma foto en varios tamaños)
     vistas, imgs = set(), []
     for src in p.imagenes:
         abs_src = urljoin(url, src.strip())
-        if abs_src.startswith("http") and abs_src not in vistas:
-            vistas.add(abs_src)
+        clave = clave_imagen(abs_src)
+        if abs_src.startswith("http") and clave not in vistas:
+            vistas.add(clave)
             imgs.append(abs_src)
     p.imagenes = imgs
     return p
 
 
+# Patrones de URL de producto. "Fuertes": casi seguro que es un producto.
+# "Débiles": solo se usan si en la página no hay ninguno fuerte.
+PATRON_FUERTE = re.compile(
+    r"/(p|producto|productos|product|products|prod|item|articulo|articulos)/"
+    r"|-\d{4,}(\.html?)?/?$|/\d{5,}/?$|/p\d{5,}|-p\d+", re.I)
+PATRON_DEBIL = re.compile(r"\.html?$", re.I)
+NO_PRODUCTO = re.compile(r"/(c|categor|categories|content|ayuda|help|login|user|cuenta|account|"
+                         r"folleto|tiendas|contact|legal|cookies|blog)", re.I)
+
+
 def extraer_enlaces_productos(html: str, url: str, patron: str | None = None) -> list[str]:
     """En una página de categoría/búsqueda, devuelve los enlaces a productos."""
     soup = BeautifulSoup(html, "lxml")
-    regex = re.compile(patron or r"/(p|producto|product|products|prod|item|articulo)[/-]|/p$|\.html$|-p\d+|/\d{5,}", re.I)
-    enlaces, vistos = [], set()
+    dominio = urlparse(url).netloc
+    seguros, fuertes, debiles = [], [], []
     for nodo in _iterar_jsonld(soup):  # ItemList en JSON-LD
         if str(nodo.get("@type")).lower() == "itemlist":
             for it in nodo.get("itemListElement", []):
@@ -271,12 +311,23 @@ def extraer_enlaces_productos(html: str, url: str, patron: str | None = None) ->
                     continue
                 item = it.get("item")
                 u = it.get("url") or (item.get("url") if isinstance(item, dict) else item)
-                if u:
-                    enlaces.append(urljoin(url, u))
+                if isinstance(u, str):
+                    seguros.append(urljoin(url, u))
     for a in soup.select("a.product-item-link[href], a.product-item-photo[href], a.product-link[href]"):
-        enlaces.append(urljoin(url, a["href"]).split("#")[0])
+        seguros.append(urljoin(url, a["href"]))
+    regex = re.compile(patron, re.I) if patron else None
     for a in soup.find_all("a", href=True):
         href = urljoin(url, a["href"]).split("#")[0]
-        if regex.search(href):
-            enlaces.append(href)
-    return [u for u in enlaces if not (u in vistos or vistos.add(u))]
+        if urlparse(href).netloc != dominio:
+            continue
+        ruta = urlparse(href).path
+        if regex:
+            if regex.search(href):
+                fuertes.append(href)
+        elif PATRON_FUERTE.search(ruta) and not NO_PRODUCTO.search(ruta):
+            fuertes.append(href)
+        elif PATRON_DEBIL.search(ruta) and not NO_PRODUCTO.search(ruta):
+            debiles.append(href)
+    enlaces = seguros + fuertes + ([] if (seguros or fuertes) else debiles)
+    vistos = set()
+    return [u.split("#")[0] for u in enlaces if not (u.split("#")[0] in vistos or vistos.add(u.split("#")[0]))]

@@ -24,10 +24,17 @@ class BloqueoAntiBot(RuntimeError):
 
 def comprobar_bloqueo(estado: int, html: str, url: str):
     cabecera = html[:3000].lower()
-    if ("just a moment" in cabecera or "cf_chl_opt" in html[:20000] or "captcha" in cabecera
+    sistema = None
+    if ("just a moment" in cabecera or "cf_chl_opt" in html[:20000]
             or (estado in (403, 429, 503) and "cloudflare" in html.lower())):
+        sistema = "Cloudflare"
+    elif estado in (403, 429) and ("access denied" in cabecera or "errors.edgesuite.net" in cabecera):
+        sistema = "Akamai"
+    elif "captcha" in cabecera or (estado == 403 and len(html) < 2000):
+        sistema = "anti-bots"
+    if sistema:
         raise BloqueoAntiBot(
-            f"{urlparse(url).netloc} está protegida por un sistema anti-bots (Cloudflare) "
+            f"{urlparse(url).netloc} está protegida por un sistema anti-bots ({sistema}) "
             "y ha bloqueado la petición desde esta conexión. Prueba desde otra red "
             "(por ejemplo, ejecutando el bot en tu móvil con Termux o en tu PC de casa).")
 
@@ -91,10 +98,16 @@ class Descargador:
             except ImportError as e:
                 raise RuntimeError("Instala Playwright: pip install playwright && playwright install chromium") from e
             self._pw = sync_playwright().start()
-            self._navegador = self._pw.chromium.launch()
+            # BOT_CHROMIUM: ruta a un Chromium ya instalado (opcional)
+            self._navegador = self._pw.chromium.launch(
+                executable_path=os.environ.get("BOT_CHROMIUM") or None)
         pagina = self._navegador.new_page(user_agent=USER_AGENT, locale="es-ES")
         try:
-            resp = pagina.goto(url, wait_until="networkidle", timeout=self.timeout * 1000 * 2)
+            resp = pagina.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000 * 2)
+            try:  # muchas webs nunca quedan "quietas" (analíticas): no esperar indefinidamente
+                pagina.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:  # noqa: BLE001
+                pass
             comprobar_bloqueo(resp.status if resp else 200, pagina.content(), url)
             # Hacer scroll para forzar la carga perezosa de imágenes/productos
             for _ in range(5):

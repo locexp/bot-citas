@@ -85,3 +85,42 @@ def test_url_publica(monkeypatch):
     monkeypatch.delenv("BOT_PERMITIR_LOCAL", raising=False)
     assert not url_publica("http://127.0.0.1/admin")
     assert not url_publica("file:///etc/passwd")
+
+
+def test_imagenes_mismo_producto_distinto_tamano():
+    html = """<script type="application/ld+json">{"@type":"Product","name":"A","image":[
+      "https://s.es/images-v3/aa/bb/500x500.jpg","https://s.es/images-v3/aa/bb/300x300.jpg",
+      "https://s.es/on/demandware.static/x/large/foto_1.jpg",
+      "https://s.es/dw/image/v2/BF_PRD/on/demandware.static/x/large/foto_1.jpg?sw=140",
+      "https://s.es/images-v3/aa/cc/500x500.jpg"]}</script>"""
+    p = extraer_producto(html, "https://s.es/p/a")
+    assert len(p.imagenes) == 3
+
+
+def test_enlaces_fuertes_ganan_a_debiles():
+    html = """<a href="/folletos.html">f</a><a href="/navidad.html">n</a>
+    <a href="/almeja-japonesa-500g-52679.html">a</a><a href="/p/sarten/p100410108">s</a>
+    <a href="https://otra.com/producto/x">x</a>"""
+    assert extraer_enlaces_productos(html, "https://s.es/") == [
+        "https://s.es/almeja-japonesa-500g-52679.html", "https://s.es/p/sarten/p100410108"]
+
+
+def test_bloqueo_akamai():
+    import pytest
+    from scraper.descargador import BloqueoAntiBot, comprobar_bloqueo
+    with pytest.raises(BloqueoAntiBot, match="Akamai"):
+        comprobar_bloqueo(403, "<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD></HTML>", "https://x.es")
+
+
+def test_descripcion_slug_descartada():
+    html = """<meta property="og:description" content="mejillones-gallegos-escabeche">
+    <h1>Mejillones</h1><span class="price">3,65 €</span>
+    <div class="product-description">Mejillones gallegos en escabeche, pack de 3 latas de 69 g.</div>"""
+    p = extraer_producto(html, "https://s.es/p/mejillones/1")
+    assert p.descripcion.startswith("Mejillones gallegos en escabeche")
+
+
+def test_descripcion_no_coge_promociones():
+    html = """<h1>Activia</h1><div class="product-info-promotions__with-description">Ahora más barato
+    Oferta desde 21/10/2026 hasta 18/11/2026 bla bla</div><div class="product-data__description"></div>"""
+    assert extraer_producto(html, "https://s.es/p/a/1").descripcion is None
