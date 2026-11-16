@@ -1,0 +1,9 @@
+{
+  "_comentario": "Opcional. Clave = dominio sin www. Úsalo si la detección automática falla en una web concreta.",
+  "mi-supermercado.com": {
+    "titulo": "h1.product-title",
+    "descripcion": ".product-description",
+    "precio": ".product-price .current",
+    "imagenes": ".product-gallery img"
+  }
+}
