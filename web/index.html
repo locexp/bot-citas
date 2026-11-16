@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f7a4d">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icono.svg">
+<link rel="apple-touch-icon" href="/static/icono.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>SuperBot</title>
+<style>
+  :root {
+    --fondo: #f4f6f3; --tarjeta: #ffffff; --texto: #1c2420; --suave: #5f6b64;
+    --borde: #dfe5e0; --acento: #1f7a4d; --acento-texto: #ffffff; --error: #b3261e;
+    --aviso-fondo: #fdecea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #111613; --tarjeta: #1b221e; --texto: #e7ece9; --suave: #9aa8a0;
+      --borde: #2c3630; --acento: #4fbf86; --acento-texto: #0b1a12; --error: #ff8a80;
+      --aviso-fondo: #3a1f1d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fondo); color: var(--texto);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.4rem; margin: 8px 0 2px; display: flex; align-items: center; gap: 10px; }
+  h1 img { width: 32px; height: 32px; }
+  .sub { color: var(--suave); margin: 0 0 16px; font-size: .95rem; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  textarea, input[type=number], input[type=password] {
+    width: 100%; font: inherit; color: inherit; background: var(--fondo);
+    border: 1px solid var(--borde); border-radius: 10px; padding: 12px;
+  }
+  textarea { min-height: 110px; resize: vertical; }
+  .modo { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--fondo); padding: 4px; border-radius: 12px; margin-bottom: 14px; }
+  .modo button { border: 0; background: transparent; color: var(--suave); font: inherit; font-weight: 600; padding: 10px; border-radius: 9px; }
+  .modo button.activo { background: var(--tarjeta); color: var(--texto); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .fila { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+  .fila > div { flex: 1 1 140px; }
+  .check { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-weight: 400; }
+  .check input { width: 22px; height: 22px; accent-color: var(--acento); }
+  .principal {
+    width: 100%; margin-top: 16px; padding: 15px; font: inherit; font-weight: 700; font-size: 1.05rem;
+    border: 0; border-radius: 12px; background: var(--acento); color: var(--acento-texto);
+  }
+  .principal:disabled { opacity: .6; }
+  .ayuda { color: var(--suave); font-size: .85rem; margin-top: 6px; }
+  #progreso { display: none; }
+  #log { font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--suave); max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin-top: 8px; }
+  .barra { height: 6px; border-radius: 3px; background: var(--borde); overflow: hidden; }
+  .barra div { height: 100%; width: 30%; background: var(--acento); animation: ir 1.2s infinite ease-in-out; }
+  @keyframes ir { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+  .errores { background: var(--aviso-fondo); color: var(--error); border-radius: 10px; padding: 10px 12px; font-size: .9rem; margin-top: 10px; display: none; word-break: break-word; }
+  .descargas { display: none; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .descargas a { flex: 1 1 100px; text-align: center; text-decoration: none; font-weight: 600; padding: 12px; border-radius: 10px; border: 1px solid var(--acento); color: var(--acento); }
+  .descargas a.zip { background: var(--acento); color: var(--acento-texto); }
+  .producto { display: grid; grid-template-columns: 96px 1fr; gap: 12px; }
+  .producto img.principal-img { width: 96px; height: 96px; object-fit: contain; background: #fff; border-radius: 10px; border: 1px solid var(--borde); }
+  .producto h3 { margin: 0 0 4px; font-size: 1rem; }
+  .precio { font-size: 1.25rem; font-weight: 800; color: var(--acento); }
+  .desc { color: var(--suave); font-size: .9rem; margin: 6px 0 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .desc.abierta { -webkit-line-clamp: unset; }
+  .miniaturas { display: flex; gap: 6px; margin-top: 8px; overflow-x: auto; }
+  .miniaturas img { width: 44px; height: 44px; object-fit: contain; background: #fff; border-radius: 6px; border: 1px solid var(--borde); flex: none; }
+  .enlace { font-size: .8rem; color: var(--suave); word-break: break-all; }
+  @media (max-width: 380px) { .producto { grid-template-columns: 72px 1fr; } .producto img.principal-img { width: 72px; height: 72px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1><img src="/static/icono.svg" alt="">SuperBot</h1>
+  <p class="sub">Descarga título, descripción, precio e imágenes de productos de supermercado.</p>
+
+  <form class="tarjeta" id="formulario">
+    <div class="modo" role="tablist">
+      <button type="button" class="activo" data-modo="producto">Productos</button>
+      <button type="button" data-modo="categoria">Categoría</button>
+    </div>
+    <label for="urls" id="etiqueta-urls">Enlaces de producto (uno por línea)</label>
+    <textarea id="urls" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
+      placeholder="https://www.supermercadosmas.com/..."></textarea>
+    <div class="ayuda" id="ayuda-urls">Consejo: en la app o web del súper, pulsa «Compartir → Copiar enlace» y pégalo aquí.</div>
+
+    <div class="fila">
+      <div id="caja-max" hidden>
+        <label for="max">Máx. productos</label>
+        <input type="number" id="max" value="20" min="1" max="40">
+      </div>
+      <div>
+        <label for="max_imagenes">Imágenes por producto</label>
+        <input type="number" id="max_imagenes" value="5" min="1" max="10">
+      </div>
+    </div>
+    <label class="check"><input type="checkbox" id="imagenes" checked> Descargar imágenes</label>
+    <label class="check"><input type="checkbox" id="navegador"> Modo navegador (webs con JavaScript, más lento)</label>
+    <div id="caja-clave" hidden style="margin-top:12px">
+      <label for="clave">Clave de acceso</label>
+      <input type="password" id="clave" autocomplete="current-password">
+    </div>
+    <button class="principal" id="boton" type="submit">Descargar productos</button>
+  </form>
+
+  <section class="tarjeta" id="progreso">
+    <strong id="estado">Trabajando…</strong>
+    <div class="barra" id="barra" style="margin-top:10px"><div></div></div>
+    <div id="log"></div>
+    <div class="errores" id="errores"></div>
+  </section>
+
+  <div class="descargas" id="descargas">
+    <a class="zip" id="dl-zip" href="#">⬇ Todo (ZIP)</a>
+    <a id="dl-csv" href="#">CSV / Excel</a>
+    <a id="dl-json" href="#">JSON</a>
+  </div>
+  <div id="resultados"></div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let modo = "producto", clave = "";
+try { clave = localStorage.getItem("superbot-clave") || ""; } catch (e) {}
+
+fetch("/api/estado").then(r => r.json()).then(e => {
+  if (e.clave) { $("#caja-clave").hidden = false; $("#clave").value = clave; }
+  $("#max").max = e.max_productos;
+});
+
+document.querySelectorAll(".modo button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".modo button").forEach(x => x.classList.toggle("activo", x === b));
+  modo = b.dataset.modo;
+  const cat = modo === "categoria";
+  $("#caja-max").hidden = !cat;
+  $("#etiqueta-urls").textContent = cat ? "Enlace de la categoría, oferta o búsqueda" : "Enlaces de producto (uno por línea)";
+  $("#ayuda-urls").textContent = cat
+    ? "Se buscarán todos los productos que aparezcan en esa página."
+    : "Consejo: en la app o web del súper, pulsa «Compartir → Copiar enlace» y pégalo aquí.";
+});
+
+const cabeceras = () => ({ "Content-Type": "application/json", "X-Clave": clave });
+const conClave = (url) => clave ? `${url}?clave=${encodeURIComponent(clave)}` : url;
+const esc = (t) => String(t ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+$("#formulario").onsubmit = async (ev) => {
+  ev.preventDefault();
+  clave = $("#clave").value;
+  try { localStorage.setItem("superbot-clave", clave); } catch (e) {}
+  $("#boton").disabled = true;
+  $("#resultados").innerHTML = "";
+  $("#descargas").style.display = "none";
+  $("#progreso").style.display = "block";
+  $("#barra").style.display = "block";
+  $("#errores").style.display = "none";
+  $("#estado").textContent = "Trabajando…";
+  $("#log").textContent = "";
+  $("#progreso").scrollIntoView({ behavior: "smooth", block: "start" });
+  try {
+    const r = await fetch("/api/trabajos", { method: "POST", headers: cabeceras(), body: JSON.stringify({
+      urls: $("#urls").value, modo, max: +$("#max").value, max_imagenes: +$("#max_imagenes").value,
+      imagenes: $("#imagenes").checked, navegador: $("#navegador").checked,
+    })});
+    const datos = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(r.status === 401 ? "Clave incorrecta" : (datos.error || "Error " + r.status));
+    seguir(datos.id);
+  } catch (e) { fin(); mostrarErrores([e.message]); $("#estado").textContent = "No se pudo empezar"; }
+};
+
+async function seguir(id) {
+  let j;
+  try { j = await (await fetch(`/api/trabajos/${id}`, { headers: cabeceras() })).json(); }
+  catch (e) { return setTimeout(() => seguir(id), 2000); }
+  $("#log").textContent = j.log.join("\n");
+  $("#log").scrollTop = 1e9;
+  if (j.estado === "trabajando") return setTimeout(() => seguir(id), 1500);
+  fin();
+  const n = j.productos.length;
+  $("#estado").textContent = n ? `✔ ${n} producto${n > 1 ? "s" : ""} descargado${n > 1 ? "s" : ""}` : "No se obtuvo ningún producto";
+  mostrarErrores(j.errores);
+  if (n) {
+    $("#descargas").style.display = "flex";
+    $("#dl-zip").href = conClave(`/api/trabajos/${id}/zip`);
+    $("#dl-csv").href = conClave(`/api/trabajos/${id}/productos.csv`);
+    $("#dl-json").href = conClave(`/api/trabajos/${id}/productos.json`);
+  }
+  $("#resultados").innerHTML = j.productos.map(p => {
+    const imgs = (p.imagenes_locales.length ? p.imagenes_locales.map(r => conClave(`/api/trabajos/${id}/imagen/${r}`)) : p.imagenes);
+    const precio = p.precio != null ? `${p.precio.toFixed(2).replace(".", ",")} ${p.moneda === "EUR" ? "€" : (p.moneda || "")}` : "Precio no encontrado";
+    return `<article class="tarjeta producto">
+      ${imgs[0] ? `<img class="principal-img" src="${esc(imgs[0])}" alt="" loading="lazy">` : `<div></div>`}
+      <div>
+        <h3>${esc(p.titulo || "(sin título)")}</h3>
+        <div class="precio">${esc(precio)}</div>
+        ${p.descripcion ? `<p class="desc" onclick="this.classList.toggle('abierta')">${esc(p.descripcion)}</p>` : ""}
+        ${imgs.length > 1 ? `<div class="miniaturas">${imgs.map(i => `<a href="${esc(i)}" target="_blank"><img src="${esc(i)}" alt="" loading="lazy"></a>`).join("")}</div>` : ""}
+        <div class="enlace"><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></div>
+      </div></article>`;
+  }).join("");
+}
+
+function fin() { $("#boton").disabled = false; $("#barra").style.display = "none"; }
+function mostrarErrores(errs) {
+  if (!errs || !errs.length) return;
+  $("#errores").style.display = "block";
+  $("#errores").innerHTML = errs.map(esc).join("<br>");
+}
+</script>
+</body>
+</html>

@@ -1,32 +1,20 @@
 #!/usr/bin/env python3
 """Bot para descargar título, descripción, precio e imágenes de productos
-de una web de supermercado.
+de una web de supermercado (línea de comandos). Para usarlo desde el móvil: app.py.
 
 Ejemplos:
   python bot.py https://tienda.com/producto/leche-entera-1l
   python bot.py --categoria https://tienda.com/lacteos --max 20
   python bot.py -f urls.txt --navegador --formato csv
-  python bot.py URL --config selectores.json
 """
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
 
-from scraper.descargador import Descargador, slug
-from scraper.extractor import extraer_enlaces_productos, extraer_producto
-
-
-def cargar_selectores(ruta: str | None, url: str) -> dict | None:
-    if not ruta:
-        return None
-    config = json.loads(Path(ruta).read_text(encoding="utf-8"))
-    dominio = urlparse(url).netloc.removeprefix("www.")
-    return config.get(dominio) or config.get("*")
+from scraper.descargador import Descargador
+from scraper.servicio import guardar, scrapear
 
 
 def main(argv=None) -> int:
@@ -55,53 +43,20 @@ def main(argv=None) -> int:
     if not urls and not args.categoria:
         ap.error("indica al menos una URL, --fichero o --categoria")
 
+    salida = Path(args.salida)
     d = Descargador(pausa=args.pausa, usar_navegador=args.navegador,
                     respetar_robots=not args.ignorar_robots)
-    salida = Path(args.salida)
-    salida.mkdir(parents=True, exist_ok=True)
-    productos = []
-
     try:
-        for cat in args.categoria:
-            print(f"Categoría: {cat}")
-            try:
-                enlaces = extraer_enlaces_productos(d.html(cat), cat, args.patron)[: args.max]
-            except Exception as e:
-                print(f" ! Error leyendo categoría: {e}")
-                continue
-            print(f" -> {len(enlaces)} productos encontrados")
-            urls += enlaces
-
-        for i, url in enumerate(dict.fromkeys(urls), 1):
-            print(f"[{i}/{len(urls)}] {url}")
-            try:
-                html = d.html(url)
-            except Exception as e:
-                print(f"   ! Error: {e}")
-                continue
-            p = extraer_producto(html, url, cargar_selectores(args.config, url))
-            p.imagenes = p.imagenes[: args.max_imagenes]
-            precio = f"{p.precio} {p.moneda or ''}".strip() if p.precio is not None else "¿?"
-            print(f"   {p.titulo or '(sin título)'} | {precio} | {len(p.imagenes)} imágenes")
-            if not args.sin_imagenes:
-                carpeta = salida / "imagenes" / slug(p.titulo or str(i))
-                for n, img in enumerate(p.imagenes, 1):
-                    if ruta := d.imagen(img, carpeta, f"{n:02d}"):
-                        p.imagenes_locales.append(ruta)
-            productos.append(p.to_dict())
+        productos, errores = scrapear(
+            urls, args.categoria, salida, max_por_categoria=args.max, patron=args.patron,
+            descargar_imagenes=not args.sin_imagenes, max_imagenes=args.max_imagenes,
+            config=args.config, descargador=d)
     finally:
         d.cerrar()
-
-    if args.formato in ("json", "ambos"):
-        (salida / "productos.json").write_text(
-            json.dumps(productos, ensure_ascii=False, indent=2), encoding="utf-8")
-    if args.formato in ("csv", "ambos") and productos:
-        with open(salida / "productos.csv", "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.DictWriter(f, fieldnames=list(productos[0].keys()))
-            w.writeheader()
-            for p in productos:
-                w.writerow({k: " | ".join(v) if isinstance(v, list) else v for k, v in p.items()})
+    guardar(productos, salida, args.formato)
     print(f"\n{len(productos)} productos guardados en {salida.resolve()}")
+    if errores:
+        print(f"{len(errores)} errores (ver arriba)")
     return 0 if productos else 1
 
 

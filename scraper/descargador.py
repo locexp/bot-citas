@@ -18,6 +18,20 @@ USER_AGENT = (
 )
 
 
+class BloqueoAntiBot(RuntimeError):
+    """La web devolvió una página de protección (Cloudflare, captcha...)."""
+
+
+def comprobar_bloqueo(estado: int, html: str, url: str):
+    cabecera = html[:3000].lower()
+    if ("just a moment" in cabecera or "cf_chl_opt" in html[:20000] or "captcha" in cabecera
+            or (estado in (403, 429, 503) and "cloudflare" in html.lower())):
+        raise BloqueoAntiBot(
+            f"{urlparse(url).netloc} está protegida por un sistema anti-bots (Cloudflare) "
+            "y ha bloqueado la petición desde esta conexión. Prueba desde otra red "
+            "(por ejemplo, ejecutando el bot en tu móvil con Termux o en tu PC de casa).")
+
+
 class Descargador:
     def __init__(self, pausa: float = 1.5, usar_navegador: bool = False,
                  respetar_robots: bool = True, timeout: int = 20):
@@ -49,6 +63,8 @@ class Descargador:
             rp = RobotFileParser()
             try:
                 r = self.sesion.get(base + "/robots.txt", timeout=self.timeout)
+                if not r.ok:
+                    comprobar_bloqueo(r.status_code, r.text, url)
                 rp.parse(r.text.splitlines() if r.ok else [])
             except requests.RequestException:
                 rp.parse([])
@@ -63,6 +79,7 @@ class Descargador:
         if self.usar_navegador:
             return self._html_navegador(url)
         r = self.sesion.get(url, timeout=self.timeout)
+        comprobar_bloqueo(r.status_code, r.text, url)
         r.raise_for_status()
         r.encoding = r.apparent_encoding if r.encoding in (None, "ISO-8859-1") else r.encoding
         return r.text
@@ -77,7 +94,8 @@ class Descargador:
             self._navegador = self._pw.chromium.launch()
         pagina = self._navegador.new_page(user_agent=USER_AGENT, locale="es-ES")
         try:
-            pagina.goto(url, wait_until="networkidle", timeout=self.timeout * 1000 * 2)
+            resp = pagina.goto(url, wait_until="networkidle", timeout=self.timeout * 1000 * 2)
+            comprobar_bloqueo(resp.status if resp else 200, pagina.content(), url)
             # Hacer scroll para forzar la carga perezosa de imágenes/productos
             for _ in range(5):
                 pagina.mouse.wheel(0, 2500)
@@ -113,5 +131,7 @@ class Descargador:
 
 
 def slug(texto: str, largo: int = 60) -> str:
-    texto = re.sub(r"[^\w\s-]", "", texto.lower(), flags=re.UNICODE)
+    import unicodedata
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
+    texto = re.sub(r"[^\w\s-]", "", texto.lower())
     return re.sub(r"[\s_-]+", "-", texto).strip("-")[:largo] or "producto"

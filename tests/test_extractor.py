@@ -45,3 +45,28 @@ def test_precios():
 def test_enlaces():
     html = '<a href="/producto/leche">a</a><a href="/contacto">b</a><a href="/producto/leche#x">c</a>'
     assert extraer_enlaces_productos(html, "https://s.es/cat") == ["https://s.es/producto/leche"]
+
+
+MAGENTO = """<html><body><h1 class="page-title"><span itemprop="name">Aceite Oliva 5L</span></h1>
+<div class="product-info-main"><span data-price-type="finalPrice" data-price-amount="26.95">
+<span class="price">26,95&nbsp;€</span></span></div>
+<div class="product attribute description"><div class="value">Aceite de oliva suave</div></div>
+<script type="text/x-magento-init">{"[data-gallery-role=gallery-placeholder]":{"mage/gallery/gallery":
+{"data":[{"thumb":"https:\\/\\/s.es\\/t.jpg","img":"https:\\/\\/s.es\\/m\\/a.jpg","full":"https:\\/\\/s.es\\/m\\/a_full.jpg"}]}}}</script>
+<a class="product-item-link" href="/aceite-otro.html">x</a></body></html>"""
+
+
+def test_magento():
+    p = extraer_producto(MAGENTO, "https://s.es/aceite.html")
+    assert p.titulo == "Aceite Oliva 5L"
+    assert p.precio == 26.95 and p.moneda == "EUR"
+    assert p.descripcion == "Aceite de oliva suave"
+    assert "https://s.es/m/a_full.jpg" in p.imagenes
+    assert extraer_enlaces_productos(MAGENTO, "https://s.es/cat")[0] == "https://s.es/aceite-otro.html"
+
+
+def test_bloqueo_cloudflare():
+    import pytest
+    from scraper.descargador import BloqueoAntiBot, comprobar_bloqueo
+    with pytest.raises(BloqueoAntiBot):
+        comprobar_bloqueo(403, "<title>Just a moment...</title>", "https://x.es")

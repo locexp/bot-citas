@@ -181,6 +181,26 @@ def _desde_meta(soup, p: Producto):
 
 
 # ---------- Heurísticas ----------
+def _desde_magento(soup, p: Producto):
+    """Tiendas Magento/Adobe Commerce (p. ej. supermercadosmas.com)."""
+    if p.precio is None:
+        el = (soup.select_one(".product-info-main [data-price-type='finalPrice'][data-price-amount]")
+              or soup.select_one(".product-info-main [data-price-amount]"))
+        if el:
+            p.precio = parsear_precio(el["data-price-amount"])
+            p.precio_texto = _limpiar(el.get_text(" ")) or el["data-price-amount"]
+    if not p.titulo and (el := soup.select_one(".page-title [itemprop=name], h1.page-title")):
+        p.titulo = _limpiar(el.get_text(" "))
+    if not p.descripcion and (el := soup.select_one(".product.attribute.description .value, .product.attribute.overview .value")):
+        p.descripcion = _limpiar(el.get_text(" "))
+    for tag in soup.find_all("script", type="text/x-magento-init"):
+        texto = tag.string or ""
+        if "gallery" not in texto:
+            continue
+        for m in re.finditer(r'"(?:full|img)"\s*:\s*"([^"]+)"', texto):
+            p.imagenes.append(m.group(1).replace("\\/", "/"))
+
+
 def _desde_heuristicas(soup, p: Producto):
     if not p.titulo and (h1 := soup.find("h1")):
         p.titulo = _limpiar(h1.get_text(" "))
@@ -224,6 +244,7 @@ def extraer_producto(html: str, url: str, selectores: dict | None = None) -> Pro
     _desde_jsonld(soup, p)
     _desde_microdatos(soup, p)
     _desde_meta(soup, p)
+    _desde_magento(soup, p)
     _desde_heuristicas(soup, p)
 
     p.moneda = p.moneda or detectar_moneda(p.precio_texto)
@@ -252,6 +273,8 @@ def extraer_enlaces_productos(html: str, url: str, patron: str | None = None) ->
                 u = it.get("url") or (item.get("url") if isinstance(item, dict) else item)
                 if u:
                     enlaces.append(urljoin(url, u))
+    for a in soup.select("a.product-item-link[href], a.product-item-photo[href], a.product-link[href]"):
+        enlaces.append(urljoin(url, a["href"]).split("#")[0])
     for a in soup.find_all("a", href=True):
         href = urljoin(url, a["href"]).split("#")[0]
         if regex.search(href):
