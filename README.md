@@ -48,6 +48,36 @@ servidores con Cloudflare, así que las opciones A y B suelen funcionar mejor.
 | `BOT_MAX_PRODUCTOS` | Límite de productos por búsqueda (40) |
 | `BOT_DATOS` | Carpeta donde se guardan las descargas (se borran a las 6 h) |
 
+## ✈️ Usarlo desde Telegram
+Le mandas un enlace al bot y te contesta con la foto, el precio y la descripción de cada
+producto, y al final un ZIP con imágenes, CSV y JSON. Funciona en cualquier móvil.
+
+1. En Telegram, abre **@BotFather** → `/newbot` → elige nombre → copia el **token**.
+2. Copia `.env.ejemplo` como `.env` y pega el token:
+   ```bash
+   cp .env.ejemplo .env
+   nano .env
+   ```
+3. Arranca el bot (en Termux, en tu PC o en un servidor):
+   ```bash
+   ./iniciar.sh telegram
+   ```
+4. Escríbele `/yo` a tu bot, pon ese número en `TELEGRAM_USUARIOS` dentro de `.env` y
+   reinicia. Así solo tú (y quien añadas) podréis usarlo.
+
+**Comandos**
+| Mensaje | Qué hace |
+|---|---|
+| un enlace (o varios) | Descarga esos productos |
+| `/categoria <enlace> [máx]` | Todos los productos de una categoría, oferta o búsqueda (20 por defecto) |
+| `/opciones` | Ver opciones · `/opciones imagenes no` · `/opciones navegador si` · `/opciones max_imagenes 3` |
+| `/yo` | Tu id de usuario |
+| `/ayuda` | Ayuda |
+
+El bot tiene que estar en marcha en algún dispositivo para responder. Si lo dejas en el
+móvil con Termux, activa «Acquire wakelock» en la notificación de Termux para que Android
+no lo pare.
+
 ## 💻 Línea de comandos
 ```bash
 python bot.py https://super.com/producto/leche https://super.com/producto/pan

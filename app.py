@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import ipaddress
 import os
 import shutil
 import socket
@@ -20,7 +19,7 @@ from urllib.parse import urlparse
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
 from scraper.descargador import Descargador
-from scraper.servicio import comprimir, guardar, scrapear
+from scraper.servicio import comprimir, guardar, scrapear, url_publica
 
 BASE = Path(__file__).parent
 TRABAJOS_DIR = Path(os.environ.get("BOT_DATOS", Path(tempfile.gettempdir()) / "superbot"))
@@ -31,25 +30,6 @@ CADUCIDAD = 6 * 3600  # se borran los trabajos de más de 6 h
 app = Flask(__name__, static_folder=str(BASE / "web"), static_url_path="/static")
 trabajos: dict[str, dict] = {}
 cerrojo = threading.Lock()
-
-
-def url_publica(url: str) -> bool:
-    """Evita que se use el bot para acceder a la red interna del servidor."""
-    try:
-        u = urlparse(url)
-        if u.scheme not in ("http", "https") or not u.hostname:
-            return False
-        try:
-            infos = socket.getaddrinfo(u.hostname, None)
-        except socket.gaierror:
-            return True  # sin DNS local (p. ej. tras un proxy): la petición decidirá
-        for info in infos:
-            ip = ipaddress.ip_address(info[4][0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                return os.environ.get("BOT_PERMITIR_LOCAL") == "1"
-        return True
-    except ValueError:
-        return False
 
 
 def comprobar_clave():

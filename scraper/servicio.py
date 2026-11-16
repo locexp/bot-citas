@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import csv
 import io
+import ipaddress
 import json
+import os
+import socket
 import zipfile
 from pathlib import Path
 from typing import Callable
@@ -88,3 +91,22 @@ def comprimir(carpeta: Path) -> bytes:
             if f.is_file():
                 z.write(f, f.relative_to(carpeta))
     return buf.getvalue()
+
+
+def url_publica(url: str) -> bool:
+    """Evita que se use el bot para acceder a la red interna del servidor."""
+    try:
+        u = urlparse(url)
+        if u.scheme not in ("http", "https") or not u.hostname:
+            return False
+        try:
+            infos = socket.getaddrinfo(u.hostname, None)
+        except socket.gaierror:
+            return True  # sin DNS local (p. ej. tras un proxy): la petición decidirá
+        for info in infos:
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return os.environ.get("BOT_PERMITIR_LOCAL") == "1"
+        return True
+    except ValueError:
+        return False

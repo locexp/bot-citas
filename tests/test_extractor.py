@@ -70,3 +70,18 @@ def test_bloqueo_cloudflare():
     from scraper.descargador import BloqueoAntiBot, comprobar_bloqueo
     with pytest.raises(BloqueoAntiBot):
         comprobar_bloqueo(403, "<title>Just a moment...</title>", "https://x.es")
+
+
+def test_ficha_telegram():
+    from telegram_bot import ficha
+    t = ficha({"titulo": "Leche *Entera*_1L", "precio": 0.99, "moneda": "EUR",
+               "descripcion": "x" * 900, "url": "https://s.es/leche_1l"})
+    assert "0,99 €" in t and "\\*Entera\\*\\_1L" in t and "https://s.es/leche\\_1l" in t
+    assert len(t) < 1000
+
+
+def test_url_publica(monkeypatch):
+    from scraper.servicio import url_publica
+    monkeypatch.delenv("BOT_PERMITIR_LOCAL", raising=False)
+    assert not url_publica("http://127.0.0.1/admin")
+    assert not url_publica("file:///etc/passwd")
