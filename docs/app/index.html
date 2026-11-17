@@ -228,6 +228,7 @@ $("#formulario").onsubmit = async (ev) => {
   $("#barra").style.display = "block";
   $("#errores").style.display = "none";
   $("#estado").textContent = "Trabajando…";
+  const aviso = setTimeout(() => { $("#estado").textContent = "Despertando el servidor (puede tardar ~1 minuto)…"; }, 6000);
   $("#log").textContent = "";
   $("#progreso").scrollIntoView({ behavior: "smooth", block: "start" });
   try {
@@ -235,16 +236,29 @@ $("#formulario").onsubmit = async (ev) => {
       urls: $("#urls").value, modo, max: +$("#max").value, max_imagenes: +$("#max_imagenes").value,
       imagenes: $("#imagenes").checked, navegador: $("#navegador").checked,
     })});
+    clearTimeout(aviso);
+    $("#estado").textContent = "Trabajando…";
     const datos = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(r.status === 401 ? "Clave incorrecta" : (datos.error || "Error " + r.status));
     seguir(datos.id);
-  } catch (e) { fin(); mostrarErrores([e.message]); $("#estado").textContent = "No se pudo empezar"; }
+  } catch (e) { clearTimeout(aviso); fin(); mostrarErrores([e.message === "Failed to fetch" ? "No se pudo contactar con el servidor." : e.message]); $("#estado").textContent = "No se pudo empezar"; }
 };
 
-async function seguir(id) {
-  let j;
-  try { j = await (await fetch(`${API}/api/trabajos/${id}`, { headers: cabeceras() })).json(); }
-  catch (e) { return setTimeout(() => seguir(id), 2000); }
+async function seguir(id, fallos = 0) {
+  let r, j;
+  try {
+    r = await fetch(`${API}/api/trabajos/${id}`, { headers: cabeceras(), cache: "no-store" });
+    if (r.status === 404) throw Object.assign(new Error("El servidor se ha reiniciado y ha perdido el trabajo. Vuelve a pulsar «Descargar productos»."), { final: true });
+    if (r.status === 401) throw Object.assign(new Error("Clave incorrecta."), { final: true });
+    if (!r.ok) throw new Error("Error " + r.status);
+    j = await r.json();
+  } catch (e) {
+    if (e.final || fallos >= 20) {
+      fin(); $("#estado").textContent = "Se ha interrumpido";
+      return mostrarErrores([e.final ? e.message : "Se ha perdido la conexión con el servidor."]);
+    }
+    return setTimeout(() => seguir(id, fallos + 1), 3000);
+  }
   $("#log").textContent = j.log.join("\n");
   $("#log").scrollTop = 1e9;
   if (j.estado === "trabajando") return setTimeout(() => seguir(id), 1500);

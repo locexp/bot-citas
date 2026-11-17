@@ -13,6 +13,8 @@ import tempfile
 import threading
 import time
 import uuid
+
+import requests
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -179,10 +181,12 @@ def descargar_fichero(tid, fichero):
 # Si hay TELEGRAM_TOKEN, el mismo servidor atiende también el bot de Telegram:
 #  - con dirección pública (RENDER_EXTERNAL_URL o BOT_URL_PUBLICA): modo webhook
 #  - sin ella (PC, Termux): consulta a Telegram en segundo plano
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_TOKEN = (os.environ.get("TELEGRAM_TOKEN") or "").strip().strip('"').strip("'")
 URL_PUBLICA = (os.environ.get("BOT_URL_PUBLICA") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
 bot_telegram = None
 SECRETO_TG = ""
+ESTADO_TG = {"configurado": bool(TELEGRAM_TOKEN), "modo": None, "arrancado": False, "error": None,
+             "bot": None, "mensajes_recibidos": 0}
 
 if TELEGRAM_TOKEN:
     import hashlib
@@ -193,13 +197,21 @@ if TELEGRAM_TOKEN:
     SECRETO_TG = hashlib.sha256(("superbot:" + TELEGRAM_TOKEN).encode()).hexdigest()[:32]
 
     def _arrancar_telegram():
-        try:
-            if URL_PUBLICA:
-                bot_telegram.activar_webhook(f"{URL_PUBLICA}/telegram/{SECRETO_TG}", SECRETO_TG)
-            else:
+        ESTADO_TG["modo"] = "webhook" if URL_PUBLICA else "polling"
+        for intento in range(5):
+            try:
+                ESTADO_TG["bot"] = "@" + bot_telegram.tg.llamar("getMe")["username"]
+                if URL_PUBLICA:
+                    bot_telegram.activar_webhook(f"{URL_PUBLICA}/telegram/{SECRETO_TG}", SECRETO_TG)
+                    ESTADO_TG.update(arrancado=True, error=None)
+                    return
+                ESTADO_TG.update(arrancado=True, error=None)
                 bot_telegram.ejecutar()
-        except Exception as e:  # noqa: BLE001
-            print("No se pudo arrancar el bot de Telegram:", e)
+                return
+            except Exception as e:  # noqa: BLE001
+                ESTADO_TG["error"] = str(e)
+                print(f"No se pudo arrancar el bot de Telegram (intento {intento + 1}/5):", e, flush=True)
+                time.sleep(10)
 
     threading.Thread(target=_arrancar_telegram, daemon=True).start()
 
@@ -209,13 +221,46 @@ def webhook_telegram(secreto):
     if (not bot_telegram or secreto != SECRETO_TG
             or request.headers.get("X-Telegram-Bot-Api-Secret-Token") != SECRETO_TG):
         abort(404)
-    bot_telegram.procesar(request.get_json(force=True, silent=True) or {})
+    ESTADO_TG["mensajes_recibidos"] += 1
+    update = request.get_json(force=True, silent=True) or {}
+    # Responder a Telegram enseguida y procesar en segundo plano
+    threading.Thread(target=bot_telegram.procesar, args=(update,), daemon=True).start()
     return "", 200
 
 
 @app.get("/salud")
 def salud():
     return "ok"
+
+
+@app.get("/api/diagnostico")
+def diagnostico():
+    """Estado del servidor para encontrar problemas (no muestra claves ni tokens)."""
+    info = {
+        "servidor": "ok",
+        "url_publica": URL_PUBLICA or None,
+        "clave_activada": bool(CLAVE),
+        "trabajos_en_memoria": len(trabajos),
+        "telegram": dict(ESTADO_TG, usuarios_permitidos=len(bot_telegram.permitidos) if bot_telegram else 0),
+    }
+    if bot_telegram:
+        try:
+            w = bot_telegram.tg.llamar("getWebhookInfo", timeout=15)
+            w = w if isinstance(w, dict) else {}
+            info["telegram"]["webhook"] = {
+                "registrado": bool(w.get("url")),
+                "apunta_a_este_servidor": bool(URL_PUBLICA) and w.get("url", "").startswith(URL_PUBLICA),
+                "mensajes_pendientes": w.get("pending_update_count"),
+                "ultimo_error": w.get("last_error_message"),
+            }
+        except Exception as e:  # noqa: BLE001
+            info["telegram"]["webhook"] = {"error_consultando": str(e)}
+    try:
+        r = requests.get("https://www.ahorramas.com/robots.txt", timeout=15)
+        info["internet"] = f"ok ({r.status_code})"
+    except Exception as e:  # noqa: BLE001
+        info["internet"] = f"error: {e}"
+    return jsonify(info)
 
 
 if __name__ == "__main__":
