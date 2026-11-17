@@ -20,6 +20,16 @@ from urllib.parse import urlparse
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
+# Precarga en el hilo principal de módulos que, si no, se importarían por primera vez
+# desde hilos en paralelo (evita bloqueos de importación en servidores lentos).
+import encodings.idna  # noqa: E402,F401
+import json  # noqa: E402,F401
+import zipfile  # noqa: E402,F401
+
+import bs4  # noqa: E402,F401
+import lxml.etree  # noqa: E402,F401
+
+from scraper import extractor  # noqa: E402,F401
 from scraper.descargador import Descargador
 from scraper.servicio import comprimir, guardar, scrapear, url_publica
 
@@ -213,7 +223,33 @@ if TELEGRAM_TOKEN:
                 print(f"No se pudo arrancar el bot de Telegram (intento {intento + 1}/5):", e, flush=True)
                 time.sleep(10)
 
-    threading.Thread(target=_arrancar_telegram, daemon=True, name="arranque-telegram").start()
+
+
+_telegram_iniciado = threading.Lock()
+_telegram_listo = False
+
+
+def iniciar_telegram():
+    """Arranca el bot de Telegram UNA vez, cuando el servidor ya ha terminado de cargar.
+
+    Lanzar hilos con red mientras el módulo aún se está importando puede dejarlos
+    bloqueados para siempre (bloqueo de importación de Python), sobre todo en
+    servidores lentos. Por eso se hace en la primera petición (el health check de
+    Render llega a los pocos segundos) y no al importar.
+    """
+    global _telegram_listo
+    if not bot_telegram or _telegram_listo:
+        return
+    with _telegram_iniciado:
+        if _telegram_listo:
+            return
+        _telegram_listo = True
+        threading.Thread(target=_arrancar_telegram, daemon=True, name="arranque-telegram").start()
+
+
+@app.before_request
+def _antes_de_cada_peticion():
+    iniciar_telegram()
 
 
 @app.post("/telegram/<secreto>")
@@ -294,4 +330,5 @@ if __name__ == "__main__":
         ip = "TU-IP"
     print(f"\n  Abre en este dispositivo:  http://localhost:{puerto}")
     print(f"  Desde otro móvil en tu wifi: http://{ip}:{puerto}\n")
+    iniciar_telegram()
     app.run(host="0.0.0.0", port=puerto, threaded=True)
