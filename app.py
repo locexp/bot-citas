@@ -31,7 +31,7 @@ CADUCIDAD = 6 * 3600  # se borran los trabajos de más de 6 h
 # Por defecto: cualquier *.github.io y localhost. "*" = todos.
 ORIGENES = os.environ.get("BOT_ORIGENES", "https://*.github.io,http://localhost:*,http://127.0.0.1:*")
 
-app = Flask(__name__, static_folder=str(BASE / "web"), static_url_path="/static")
+app = Flask(__name__, static_folder=str(BASE / "docs" / "app"), static_url_path="/static")
 
 
 def origen_permitido(origen: str) -> bool:
@@ -90,18 +90,18 @@ def ejecutar(tid: str, urls, categorias, opciones):
 
 @app.get("/")
 def inicio():
-    return send_from_directory(BASE / "web", "index.html")
+    return send_from_directory(BASE / "docs" / "app", "index.html")
 
 
 @app.get("/manifest.webmanifest")
 def manifest():
-    return send_from_directory(BASE / "web", "manifest.webmanifest",
+    return send_from_directory(BASE / "docs" / "app", "manifest.webmanifest",
                                mimetype="application/manifest+json")
 
 
 @app.get("/icono.svg")
 def icono():
-    return send_from_directory(BASE / "web", "icono.svg")
+    return send_from_directory(BASE / "docs" / "app", "icono.svg")
 
 
 @app.get("/api/estado")

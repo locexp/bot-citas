@@ -9,8 +9,10 @@ Se usa desde el **móvil** (app web) o desde la línea de comandos.
 la app necesita un bot funcionando (en Termux, tu PC o un servidor): pulsa **⚙ Servidor** y
 escribe su dirección. También vale `…/app/?servidor=http://localhost:8000`.
 
-La web se publica sola con `.github/workflows/pages.yml` a partir de `pagina/` y `web/`.
-Para activarla la primera vez: en GitHub, **Settings → Pages → Source: GitHub Actions**.
+La web está en la carpeta `docs/` (`docs/index.html` es la presentación y `docs/app/` la
+app, que es la misma que sirve `app.py`). Para activarla la primera vez: en GitHub,
+**Settings → Pages → Source: Deploy from a branch → rama `ccr-962fb0fd-stdhyu`, carpeta `/docs`**.
+Después, cada cambio que se suba a `docs/` se publica solo.
 
 Por seguridad, el bot solo acepta peticiones de otras webs si vienen de `*.github.io` o de
 `localhost` (se cambia con `BOT_ORIGENES`, por ejemplo `BOT_ORIGENES=https://mi-dominio.com`).
