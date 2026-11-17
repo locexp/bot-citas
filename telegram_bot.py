@@ -105,10 +105,9 @@ class Bot:
     def ops(self, chat):
         return self.opciones.setdefault(chat, {"imagenes": True, "navegador": False, "max_imagenes": 5})
 
-    # ---------- Bucle principal ----------
-    def ejecutar(self):
+    # ---------- Arranque ----------
+    def preparar(self):
         yo = self.tg.llamar("getMe")
-        print(f"Bot @{yo['username']} en marcha. Ctrl+C para parar.")
         if not self.permitidos:
             print("AVISO: sin TELEGRAM_USUARIOS, cualquiera puede usar el bot.")
         self.tg.llamar("setMyCommands", commands=[
@@ -117,6 +116,27 @@ class Bot:
             {"command": "ayuda", "description": "Cómo usar el bot"},
             {"command": "yo", "description": "Mi id de usuario"},
         ])
+        return yo
+
+    def activar_webhook(self, url: str, secreto: str):
+        """Modo servidor: Telegram envía cada mensaje a `url` (y despierta servidores dormidos)."""
+        yo = self.preparar()
+        self.tg.llamar("setWebhook", url=url, secret_token=secreto, allowed_updates=["message"],
+                       drop_pending_updates=False)
+        print(f"Bot de Telegram @{yo['username']} activo (webhook).")
+
+    def procesar(self, update: dict):
+        if msg := update.get("message"):
+            try:
+                self.atender(msg)
+            except Exception as e:  # noqa: BLE001
+                print("Error atendiendo mensaje:", e)
+
+    def ejecutar(self):
+        """Modo local: consulta a Telegram cada pocos segundos (long polling)."""
+        yo = self.preparar()
+        self.tg.llamar("deleteWebhook")  # por si antes estuvo en un servidor
+        print(f"Bot @{yo['username']} en marcha. Ctrl+C para parar.")
         desplazamiento = None
         while True:
             try:
@@ -128,11 +148,7 @@ class Bot:
                 continue
             for u in updates:
                 desplazamiento = u["update_id"] + 1
-                if msg := u.get("message"):
-                    try:
-                        self.atender(msg)
-                    except Exception as e:  # noqa: BLE001
-                        print("Error atendiendo mensaje:", e)
+                self.procesar(u)
 
     def atender(self, msg):
         chat = msg["chat"]["id"]
@@ -252,14 +268,17 @@ class Bot:
             self.tg.texto(chat, texto.replace("\\", "").replace("*", ""))
 
 
+def usuarios_permitidos() -> set[int]:
+    return {int(x) for x in re.split(r"[,\s]+", os.environ.get("TELEGRAM_USUARIOS", "")) if x.strip().isdigit()}
+
+
 def main():
     token = os.environ.get("TELEGRAM_TOKEN")
     if not token:
         sys.exit("Falta TELEGRAM_TOKEN. Créalo con @BotFather en Telegram.\n"
                  "Ejemplo: TELEGRAM_TOKEN=123456:ABC... python telegram_bot.py")
-    permitidos = {int(x) for x in re.split(r"[,\s]+", os.environ.get("TELEGRAM_USUARIOS", "")) if x.strip().isdigit()}
     try:
-        Bot(token, permitidos).ejecutar()
+        Bot(token, usuarios_permitidos()).ejecutar()
     except KeyboardInterrupt:
         print("\nBot detenido.")
 

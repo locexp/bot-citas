@@ -1,0 +1,6 @@
+.git
+salida
+__pycache__
+tests
+*.pyc
+.env

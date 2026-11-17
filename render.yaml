@@ -1,0 +1,21 @@
+# Despliegue en Render (plan gratuito). Botón en el README:
+# https://render.com/deploy?repo=https://github.com/locexp/bot-citas
+services:
+  - type: web
+    name: superbot
+    runtime: python
+    plan: free
+    branch: ccr-962fb0fd-stdhyu
+    buildCommand: pip install -r requirements.txt
+    # 1 proceso: los trabajos se guardan en memoria
+    startCommand: gunicorn app:app --workers 1 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT
+    healthCheckPath: /salud
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: BOT_CLAVE          # clave de la app; Render la genera y la ves en "Environment"
+        generateValue: true
+      - key: TELEGRAM_TOKEN     # opcional: token de @BotFather
+        sync: false
+      - key: TELEGRAM_USUARIOS  # opcional: tu id de Telegram (escribe /yo al bot)
+        sync: false

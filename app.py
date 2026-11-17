@@ -175,6 +175,49 @@ def descargar_fichero(tid, fichero):
     return send_from_directory(j["carpeta"], fichero, as_attachment=True)
 
 
+# ---------- Bot de Telegram integrado (opcional) ----------
+# Si hay TELEGRAM_TOKEN, el mismo servidor atiende también el bot de Telegram:
+#  - con dirección pública (RENDER_EXTERNAL_URL o BOT_URL_PUBLICA): modo webhook
+#  - sin ella (PC, Termux): consulta a Telegram en segundo plano
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+URL_PUBLICA = (os.environ.get("BOT_URL_PUBLICA") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+bot_telegram = None
+SECRETO_TG = ""
+
+if TELEGRAM_TOKEN:
+    import hashlib
+
+    from telegram_bot import Bot, usuarios_permitidos
+
+    bot_telegram = Bot(TELEGRAM_TOKEN, usuarios_permitidos())
+    SECRETO_TG = hashlib.sha256(("superbot:" + TELEGRAM_TOKEN).encode()).hexdigest()[:32]
+
+    def _arrancar_telegram():
+        try:
+            if URL_PUBLICA:
+                bot_telegram.activar_webhook(f"{URL_PUBLICA}/telegram/{SECRETO_TG}", SECRETO_TG)
+            else:
+                bot_telegram.ejecutar()
+        except Exception as e:  # noqa: BLE001
+            print("No se pudo arrancar el bot de Telegram:", e)
+
+    threading.Thread(target=_arrancar_telegram, daemon=True).start()
+
+
+@app.post("/telegram/<secreto>")
+def webhook_telegram(secreto):
+    if (not bot_telegram or secreto != SECRETO_TG
+            or request.headers.get("X-Telegram-Bot-Api-Secret-Token") != SECRETO_TG):
+        abort(404)
+    bot_telegram.procesar(request.get_json(force=True, silent=True) or {})
+    return "", 200
+
+
+@app.get("/salud")
+def salud():
+    return "ok"
+
+
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", "8000"))
     try:

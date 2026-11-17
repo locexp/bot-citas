@@ -119,11 +119,15 @@ python app.py</pre></li>
   </details>
 
   <details>
-    <summary>☁️ En un servidor (Render, Railway, VPS…)</summary>
+    <summary>☁️ En un servidor gratuito (Render)</summary>
     <ol>
-      <li>Despliega el repositorio con el comando de inicio <code>python app.py</code> y pon la variable <code>BOT_CLAVE</code> con una clave.</li>
-      <li>En <a href="app/">la app</a>, pulsa <strong>⚙ Servidor</strong> y escribe la dirección <code>https://…</code> del servidor.</li>
-      <li>Ojo: muchas tiendas bloquean las conexiones de servidores en la nube. Desde casa o el móvil suele ir mejor.</li>
+      <li><a href="https://render.com/deploy?repo=https://github.com/locexp/bot-citas"><img
+        src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" height="32"
+        style="vertical-align:middle"></a> y entra con tu cuenta de GitHub (plan Free, sin tarjeta).</li>
+      <li>Si quieres el bot de Telegram, rellena <code>TELEGRAM_TOKEN</code> y <code>TELEGRAM_USUARIOS</code>; si no, déjalos vacíos. Pulsa <strong>Deploy</strong>.</li>
+      <li>Copia la dirección del servicio (<code>https://superbot-….onrender.com</code>) y la clave <code>BOT_CLAVE</code> que verás en <strong>Environment</strong>.</li>
+      <li>En <a href="app/">la app</a>, pulsa <strong>⚙ Servidor</strong>, pega la dirección y escribe la clave.</li>
+      <li>El plan gratuito se duerme tras 15 min sin uso: la primera petición tarda ~1 minuto.</li>
     </ol>
   </details>
 

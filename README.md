@@ -18,6 +18,28 @@ Después, cada cambio que se suba a `docs/` se publica solo.
 Por seguridad, el bot solo acepta peticiones de otras webs si vienen de `*.github.io` o de
 `localhost` (se cambia con `BOT_ORIGENES`, por ejemplo `BOT_ORIGENES=https://mi-dominio.com`).
 
+## ☁️ Servidor gratuito en Render (un botón)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/locexp/bot-citas)
+
+1. Pulsa el botón y entra en Render con tu cuenta de GitHub (plan **Free**, sin tarjeta).
+2. Render pregunta por `TELEGRAM_TOKEN` y `TELEGRAM_USUARIOS`: rellénalos si quieres el bot de
+   Telegram, o déjalos vacíos. Pulsa **Apply / Deploy** y espera unos minutos.
+3. Copia la dirección del servicio (algo como `https://superbot-xxxx.onrender.com`) y la clave
+   que Render ha generado (servicio → **Environment** → `BOT_CLAVE`).
+4. Abre la app (https://locexp.github.io/bot-citas/docs/app/ o directamente la dirección de
+   Render), pulsa **⚙ Servidor**, pega la dirección y luego escribe la clave.
+
+Si pusiste `TELEGRAM_TOKEN`, el bot de Telegram funciona en el mismo servidor (modo webhook):
+no hace falta tener nada encendido en el móvil ni en el PC.
+
+**Limitaciones del plan gratuito:** el servidor se «duerme» tras 15 minutos sin uso y tarda
+alrededor de un minuto en despertar con la siguiente petición (o el siguiente mensaje de
+Telegram). No incluye el «modo navegador». Y algunas tiendas bloquean los servidores en la
+nube (ver la tabla de webs probadas). Alcampo, Ahorramas y Lidl funcionaron desde la nube.
+
+También hay un `Dockerfile` para otros servicios gratuitos basados en Docker (Koyeb,
+Hugging Face Spaces…).
+
 ## 📱 Usarlo desde el móvil
 
 ### Opción A: en el propio móvil Android con Termux (recomendada)

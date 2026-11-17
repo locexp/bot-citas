@@ -4,3 +4,4 @@ lxml>=4.9
 # Opcional, para webs que cargan productos con JavaScript:
 # playwright>=1.40
 flask>=3.0
+gunicorn>=22.0
