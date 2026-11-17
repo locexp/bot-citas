@@ -39,8 +39,12 @@
     border: 1px solid var(--borde); border-radius: 10px; padding: 12px;
   }
   textarea { min-height: 110px; resize: vertical; }
-  .modo { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--fondo); padding: 4px; border-radius: 12px; margin-bottom: 14px; }
-  .modo button { border: 0; background: transparent; color: var(--suave); font: inherit; font-weight: 600; padding: 10px; border-radius: 9px; }
+  .modo { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; background: var(--fondo); padding: 4px; border-radius: 12px; margin-bottom: 14px; }
+  .modo button { border: 0; background: transparent; color: var(--suave); font: inherit; font-weight: 600; padding: 10px 4px; border-radius: 9px; font-size: .95rem; }
+  input[type=text] { width: 100%; font: inherit; color: inherit; background: var(--fondo); border: 1px solid var(--borde); border-radius: 10px; padding: 12px; }
+  .barra.fija div { animation: none; margin-left: 0; transition: width .4s; }
+  #boton-parar { display: none; margin-top: 12px; width: 100%; padding: 11px; font: inherit; font-weight: 700; border-radius: 10px; border: 1px solid var(--error); background: transparent; color: var(--error); }
+  .nota { color: var(--suave); font-size: .9rem; text-align: center; margin: 4px 0 14px; }
   .modo button.activo { background: var(--tarjeta); color: var(--texto); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
   .fila { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
   .fila > div { flex: 1 1 140px; }
@@ -98,11 +102,18 @@
     <div class="modo" role="tablist">
       <button type="button" class="activo" data-modo="producto">Productos</button>
       <button type="button" data-modo="categoria">Categoría</button>
+      <button type="button" data-modo="web">Web entera</button>
     </div>
     <label for="urls" id="etiqueta-urls">Enlaces de producto (uno por línea)</label>
     <textarea id="urls" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
       placeholder="https://www.supermercadosmas.com/..."></textarea>
     <div class="ayuda" id="ayuda-urls">Consejo: en la app o web del súper, pulsa «Compartir → Copiar enlace» y pégalo aquí.</div>
+
+    <div id="caja-filtro" hidden style="margin-top:12px">
+      <label for="filtro">Filtro (opcional)</label>
+      <input type="text" id="filtro" placeholder="p. ej. leche, aceite oliva…" autocapitalize="off">
+      <div class="ayuda">Solo productos cuyo enlace contenga todas estas palabras.</div>
+    </div>
 
     <div class="fila">
       <div id="caja-max" hidden>
@@ -128,6 +139,7 @@
     <div class="barra" id="barra" style="margin-top:10px"><div></div></div>
     <div id="log"></div>
     <div class="errores" id="errores"></div>
+    <button type="button" id="boton-parar">⏹ Parar y quedarme con lo descargado</button>
   </section>
 
   <div class="descargas" id="descargas">
@@ -140,7 +152,8 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
-let modo = "producto", clave = "", API = "";
+let modo = "producto", clave = "", API = "", limites = { categoria: 40, web: 5000 }, trabajoActual = null;
+let imagenesAntes = true;
 const leer = (k) => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } };
 const escribir = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 clave = leer("superbot-clave");
@@ -158,7 +171,8 @@ async function conectar(base) {
   API = base;
   $("#caja-clave").hidden = !e.clave;
   if (e.clave) $("#clave").value = clave;
-  $("#max").max = e.max_productos;
+  limites = { categoria: e.max_productos, web: e.max_escaneo || 5000 };
+  $("#max").max = limites[modo] || e.max_productos;
   $("#boton").disabled = false;
   return e;
 }
@@ -204,13 +218,25 @@ $("#guardar-servidor").onclick = async () => {
 
 document.querySelectorAll(".modo button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".modo button").forEach(x => x.classList.toggle("activo", x === b));
+  const anterior = modo;
   modo = b.dataset.modo;
-  const cat = modo === "categoria";
-  $("#caja-max").hidden = !cat;
-  $("#etiqueta-urls").textContent = cat ? "Enlace de la categoría, oferta o búsqueda" : "Enlaces de producto (uno por línea)";
-  $("#ayuda-urls").textContent = cat
-    ? "Se buscarán todos los productos que aparezcan en esa página."
-    : "Consejo: en la app o web del súper, pulsa «Compartir → Copiar enlace» y pégalo aquí.";
+  const textos = {
+    producto: ["Enlaces de producto (uno por línea)", "Consejo: en la app o web del súper, pulsa «Compartir → Copiar enlace» y pégalo aquí.", "https://www.ahorramas.com/..."],
+    categoria: ["Enlace de la categoría, oferta o búsqueda", "Se descargarán los productos que aparezcan en esa página.", "https://www.compraonline.alcampo.es/categories/..."],
+    web: ["Dirección de la web del supermercado", "Se buscan todos sus productos (en su sitemap o recorriendo las categorías). Con miles de productos puede tardar horas: elige la cantidad.", "https://www.ahorramas.com"],
+  }[modo];
+  $("#etiqueta-urls").textContent = textos[0];
+  $("#ayuda-urls").textContent = textos[1];
+  $("#urls").placeholder = textos[2];
+  $("#caja-max").hidden = modo === "producto";
+  $("#caja-filtro").hidden = modo !== "web";
+  if (modo !== "producto") {
+    $("#max").max = limites[modo];
+    $("#max").value = modo === "web" ? 200 : Math.min(+$("#max").value || 20, limites.categoria);
+  }
+  // En webs enteras, por defecto sin descargar imágenes (con miles de productos ocupan mucho)
+  if (modo === "web" && anterior !== "web") { imagenesAntes = $("#imagenes").checked; $("#imagenes").checked = false; }
+  if (modo !== "web" && anterior === "web") $("#imagenes").checked = imagenesAntes;
 });
 
 const cabeceras = () => ({ "Content-Type": "application/json", "X-Clave": clave });
@@ -234,12 +260,15 @@ $("#formulario").onsubmit = async (ev) => {
   try {
     const r = await fetch(`${API}/api/trabajos`, { method: "POST", headers: cabeceras(), body: JSON.stringify({
       urls: $("#urls").value, modo, max: +$("#max").value, max_imagenes: +$("#max_imagenes").value,
+      filtro: modo === "web" ? $("#filtro").value : "",
       imagenes: $("#imagenes").checked, navegador: $("#navegador").checked,
     })});
     clearTimeout(aviso);
     $("#estado").textContent = "Trabajando…";
     const datos = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(r.status === 401 ? "Clave incorrecta" : (datos.error || "Error " + r.status));
+    trabajoActual = datos.id;
+    $("#boton-parar").style.display = "block"; $("#boton-parar").disabled = false;
     seguir(datos.id);
   } catch (e) { clearTimeout(aviso); fin(); mostrarErrores([e.message === "Failed to fetch" ? "No se pudo contactar con el servidor." : e.message]); $("#estado").textContent = "No se pudo empezar"; }
 };
@@ -261,9 +290,21 @@ async function seguir(id, fallos = 0) {
   }
   $("#log").textContent = j.log.join("\n");
   $("#log").scrollTop = 1e9;
-  if (j.estado === "trabajando") return setTimeout(() => seguir(id), 1500);
+  if (j.estado === "trabajando") {
+    if (j.total) {
+      if (!seguir.inicio) seguir.inicio = { t: Date.now(), h: j.hecho };
+      let texto = `Descargando ${j.hecho}/${j.total} productos`;
+      const hechos = j.hecho - seguir.inicio.h;
+      if (hechos > 2) texto += ` · quedan ~${duracion((Date.now() - seguir.inicio.t) / hechos * (j.total - j.hecho) / 1000)}`;
+      $("#estado").textContent = texto;
+      $("#barra").classList.add("fija");
+      $("#barra div").style.width = `${Math.max(2, 100 * j.hecho / j.total)}%`;
+    }
+    return setTimeout(() => seguir(id), 2000);
+  }
   fin();
-  const n = j.productos.length;
+  seguir.inicio = null;
+  const n = j.total_productos ?? j.productos.length;
   $("#estado").textContent = n ? `✔ ${n} producto${n > 1 ? "s" : ""} descargado${n > 1 ? "s" : ""}` : "No se obtuvo ningún producto";
   mostrarErrores(j.errores);
   if (n) {
@@ -272,7 +313,9 @@ async function seguir(id, fallos = 0) {
     $("#dl-csv").href = conClave(`${API}/api/trabajos/${id}/productos.csv`);
     $("#dl-json").href = conClave(`${API}/api/trabajos/${id}/productos.json`);
   }
-  $("#resultados").innerHTML = j.productos.map(p => {
+  const nota = n > j.productos.length
+    ? `<p class="nota">Se muestran ${j.productos.length} de ${n}. Todos están en el CSV, el JSON y el ZIP.</p>` : "";
+  $("#resultados").innerHTML = nota + j.productos.map(p => {
     const imgs = (p.imagenes_locales.length ? p.imagenes_locales.map(r => conClave(`${API}/api/trabajos/${id}/imagen/${r}`)) : p.imagenes);
     const precio = p.precio != null ? `${p.precio.toFixed(2).replace(".", ",")} ${p.moneda === "EUR" ? "€" : (p.moneda || "")}` : "Precio no encontrado";
     return `<article class="tarjeta producto">
@@ -287,7 +330,21 @@ async function seguir(id, fallos = 0) {
   }).join("");
 }
 
-function fin() { $("#boton").disabled = false; $("#barra").style.display = "none"; }
+function fin() {
+  $("#boton").disabled = false; $("#barra").style.display = "none";
+  $("#barra").classList.remove("fija"); $("#barra div").style.width = "";
+  $("#boton-parar").style.display = "none"; trabajoActual = null;
+}
+function duracion(s) {
+  const m = Math.round(s / 60);
+  return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : (m ? `${m} min` : `${Math.round(s)} s`);
+}
+$("#boton-parar").onclick = async () => {
+  if (!trabajoActual) return;
+  $("#boton-parar").disabled = true;
+  $("#estado").textContent = "Parando… enseguida tendrás lo descargado.";
+  try { await fetch(`${API}/api/trabajos/${trabajoActual}/parar`, { method: "POST", headers: cabeceras() }); } catch (e) {}
+};
 function mostrarErrores(errs) {
   if (!errs || !errs.length) return;
   $("#errores").style.display = "block";

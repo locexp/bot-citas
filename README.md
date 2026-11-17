@@ -105,6 +105,8 @@ producto, y al final un ZIP con imágenes, CSV y JSON. Funciona en cualquier mó
 **Comandos**
 | Mensaje | Qué hace |
 |---|---|
+| `/web <enlace> [cantidad] [filtro]` | **Escanea la web entera** y descarga sus productos (200 por defecto; `todos` = hasta 5000). Ej.: `/web https://www.ahorramas.com todos leche` |
+| `/parar` | Detiene el escaneo y envía lo descargado hasta ese momento |
 | un enlace (o varios) | Descarga esos productos |
 | `/categoria <enlace> [máx]` | Todos los productos de una categoría, oferta o búsqueda (20 por defecto) |
 | `/opciones` | Ver opciones · `/opciones imagenes no` · `/opciones navegador si` · `/opciones max_imagenes 3` |
@@ -127,6 +129,27 @@ El resultado se guarda en `salida/`: `productos.json`, `productos.csv` e `imagen
 Opciones: `--config selectores.json` (selectores CSS propios por dominio, ver
 `selectores.ejemplo.json`), `--patron REGEX`, `--sin-imagenes`, `--max-imagenes N`,
 `--formato json|csv|ambos`, `--pausa S`.
+
+## Escanear una web entera
+El bot busca los productos en el **sitemap** de la web (el índice que las tiendas publican
+para los buscadores, indicado en su `robots.txt`). Si no hay, recorre la web por categorías
+y páginas. Respeta el `Crawl-delay` que pida cada web.
+
+| Web | Productos en su sitemap (nov. 2026) |
+|---|---|
+| Alcampo | ~96.000 |
+| Lidl | ~7.500 |
+| Ahorramas | ~4.500 |
+
+Cada producto tarda unos 2 segundos (pausa de cortesía incluida): **1.000 productos ≈ 35 min**.
+Por eso conviene usar la cantidad y el filtro. Con más de 10 productos, en Telegram se envía un
+resumen y las tablas (CSV y JSON, con los enlaces de las fotos). Las imágenes de los escaneos
+no se descargan salvo que lo pidas (`/opciones imagenes_web si`), y entonces van en ZIPs de
+menos de 50 MB. En Render, el servidor no se duerme mientras haya un escaneo en marcha.
+Si el servidor se reinicia (por ejemplo, al desplegar una versión nueva), el escaneo en
+curso se pierde.
+
+Variables: `BOT_MAX_ESCANEO` (máximo por escaneo, 5000), `BOT_LIMITE_ESCANEO` (segundos, 8 h).
 
 ## Cómo detecta los datos
 1. Selectores CSS propios (`selectores.json`, si existe)

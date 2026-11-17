@@ -31,13 +31,14 @@ import lxml.etree  # noqa: E402,F401
 
 from scraper import extractor  # noqa: E402,F401
 from scraper.descargador import Descargador
-from scraper.servicio import comprimir, guardar, scrapear, url_publica
+from scraper.servicio import comprimir_a_fichero, guardar, scrapear, url_publica
 
 BASE = Path(__file__).parent
 TRABAJOS_DIR = Path(os.environ.get("BOT_DATOS", Path(tempfile.gettempdir()) / "superbot"))
 CLAVE = os.environ.get("BOT_CLAVE")
 MAX_PRODUCTOS = int(os.environ.get("BOT_MAX_PRODUCTOS", "40"))
-CADUCIDAD = 6 * 3600  # se borran los trabajos de más de 6 h
+MAX_ESCANEO = int(os.environ.get("BOT_MAX_ESCANEO", "5000"))
+CADUCIDAD = 12 * 3600  # se borran los trabajos de más de 12 h
 
 # Orígenes web que pueden usar esta API desde otra página (p. ej. la app en GitHub Pages).
 # Por defecto: cualquier *.github.io y localhost. "*" = todos.
@@ -81,17 +82,29 @@ def limpiar_antiguos():
     with cerrojo:
         for tid in [t for t, j in trabajos.items() if ahora - j["creado"] > CADUCIDAD]:
             shutil.rmtree(trabajos.pop(tid)["carpeta"], ignore_errors=True)
+            (TRABAJOS_DIR / f"{tid}.zip").unlink(missing_ok=True)
 
 
 def ejecutar(tid: str, urls, categorias, opciones):
     j = trabajos[tid]
-    log = lambda msg: j["log"].append(msg)
+
+    def log(msg):
+        j["log"].append(msg)
+        del j["log"][:-200]  # solo las últimas líneas (los escaneos generan miles)
+        if msg.startswith("["):
+            try:
+                j["hecho"], j["total"] = (int(x) for x in msg[1:msg.index("]")].split("/"))
+            except ValueError:
+                pass
+
     d = Descargador(pausa=opciones["pausa"], usar_navegador=opciones["navegador"])
     try:
         productos, errores = scrapear(
             urls, categorias, j["carpeta"], max_por_categoria=opciones["max"],
             descargar_imagenes=opciones["imagenes"], max_imagenes=opciones["max_imagenes"],
-            config=str(BASE / "selectores.json"), descargador=d, log=log)
+            config=str(BASE / "selectores.json"), descargador=d, log=log,
+            sitios=opciones.get("sitios"), max_escaneo=opciones["max"], filtro=opciones.get("filtro"),
+            parar=j["parar"])
         guardar(productos, j["carpeta"])
         j.update(productos=productos, errores=errores, estado="terminado")
     except Exception as e:  # noqa: BLE001
@@ -118,7 +131,7 @@ def icono():
 
 @app.get("/api/estado")
 def estado():
-    return jsonify(clave=bool(CLAVE), max_productos=MAX_PRODUCTOS)
+    return jsonify(clave=bool(CLAVE), max_productos=MAX_PRODUCTOS, max_escaneo=MAX_ESCANEO)
 
 
 @app.post("/api/trabajos")
@@ -127,6 +140,7 @@ def crear():
     limpiar_antiguos()
     datos = request.get_json(force=True, silent=True) or {}
     lineas = [l.strip() for l in str(datos.get("urls", "")).splitlines() if l.strip()]
+    modo = datos.get("modo")
     if not lineas:
         return jsonify(error="Escribe al menos una URL"), 400
     if len(lineas) > MAX_PRODUCTOS:
@@ -135,31 +149,49 @@ def crear():
     if malas:
         return jsonify(error=f"URL no válida: {malas[0]}"), 400
 
-    es_categoria = datos.get("modo") == "categoria"
+    tope = MAX_ESCANEO if modo == "web" else MAX_PRODUCTOS
     opciones = {
-        "max": max(1, min(int(datos.get("max", 20)), MAX_PRODUCTOS)),
+        "max": max(1, min(int(datos.get("max") or 20), tope)),
         "imagenes": bool(datos.get("imagenes", True)),
         "max_imagenes": max(1, min(int(datos.get("max_imagenes", 5)), 10)),
         "navegador": bool(datos.get("navegador", False)),
         "pausa": 1.5,
     }
+    urls, categorias = lineas, []
+    if modo == "categoria":
+        urls, categorias = [], lineas
+    elif modo == "web":
+        urls = []
+        opciones.update(sitios=lineas[:1], filtro=(str(datos.get("filtro") or "").strip() or None))
     tid = uuid.uuid4().hex[:12]
     carpeta = TRABAJOS_DIR / tid
     carpeta.mkdir(parents=True, exist_ok=True)
     trabajos[tid] = {"estado": "trabajando", "log": [], "productos": [], "errores": [],
-                     "carpeta": carpeta, "creado": time.time()}
-    threading.Thread(
-        target=ejecutar, daemon=True,
-        args=(tid, [] if es_categoria else lineas, lineas if es_categoria else [], opciones),
-    ).start()
+                     "carpeta": carpeta, "creado": time.time(), "hecho": 0, "total": 0,
+                     "parar": threading.Event()}
+    threading.Thread(target=ejecutar, daemon=True, args=(tid, urls, categorias, opciones),
+                     name=f"trabajo-web-{tid}").start()
     return jsonify(id=tid)
+
+
+@app.post("/api/trabajos/<tid>/parar")
+def parar(tid):
+    comprobar_clave()
+    j = trabajos.get(tid) or abort(404)
+    j["parar"].set()
+    return jsonify(ok=True)
 
 
 @app.get("/api/trabajos/<tid>")
 def consultar(tid):
     comprobar_clave()
     j = trabajos.get(tid) or abort(404)
-    return jsonify({k: v for k, v in j.items() if k != "carpeta"})
+    datos = {k: v for k, v in j.items() if k not in ("carpeta", "parar", "productos")}
+    datos["log"] = j["log"][-20:]
+    datos["total_productos"] = len(j["productos"])
+    # Con miles de productos, la página solo necesita una muestra (el resto va en los ficheros)
+    datos["productos"] = j["productos"][:100]
+    return jsonify(datos)
 
 
 @app.get("/api/trabajos/<tid>/imagen/<path:ruta>")
@@ -173,9 +205,11 @@ def imagen(tid, ruta):
 def descargar_zip(tid):
     comprobar_clave()
     j = trabajos.get(tid) or abort(404)
-    import io
-    return send_file(io.BytesIO(comprimir(j["carpeta"])), mimetype="application/zip",
-                     as_attachment=True, download_name=f"productos-{tid}.zip")
+    destino = TRABAJOS_DIR / f"{tid}.zip"
+    if not destino.exists() or j["estado"] == "trabajando":
+        comprimir_a_fichero(j["carpeta"], destino)
+    return send_file(destino, mimetype="application/zip", as_attachment=True,
+                     download_name=f"productos-{tid}.zip")
 
 
 @app.get("/api/trabajos/<tid>/<fichero>")
@@ -247,9 +281,34 @@ def iniciar_telegram():
         threading.Thread(target=_arrancar_telegram, daemon=True, name="arranque-telegram").start()
 
 
+def hay_trabajo_en_marcha() -> bool:
+    return (any(j["estado"] == "trabajando" for j in list(trabajos.values()))
+            or bool(bot_telegram and bot_telegram.ocupado))
+
+
+def _mantener_despierto():
+    """Render (plan gratuito) duerme el servidor tras 15 min sin peticiones de fuera, aunque
+    esté trabajando. Mientras haya un escaneo en marcha, se hace una petición a sí mismo
+    a través de su dirección pública cada 5 minutos. Sin trabajo, se deja dormir."""
+    while True:
+        time.sleep(300)
+        if URL_PUBLICA and hay_trabajo_en_marcha():
+            try:
+                requests.get(f"{URL_PUBLICA}/salud", timeout=30)
+            except requests.RequestException:
+                pass
+
+
+_despertador_iniciado = False
+
+
 @app.before_request
 def _antes_de_cada_peticion():
+    global _despertador_iniciado
     iniciar_telegram()
+    if URL_PUBLICA and not _despertador_iniciado:
+        _despertador_iniciado = True
+        threading.Thread(target=_mantener_despierto, daemon=True, name="mantener-despierto").start()
 
 
 @app.post("/telegram/<secreto>")
@@ -296,7 +355,7 @@ def diagnostico():
         "clave_activada": bool(CLAVE),
         "trabajos_en_memoria": len(trabajos),
         "telegram": dict(ESTADO_TG, usuarios_permitidos=len(bot_telegram.permitidos) if bot_telegram else 0,
-                         ocupado={str(c): f"{int(time.time() - t)} s" for c, (t, _) in bot_telegram.ocupado.items()}
+                         ocupado={str(c): f"{int(time.time() - t)} s" for c, (t, *_) in bot_telegram.ocupado.items()}
                          if bot_telegram else {},
                          ultimos_mensajes=list(bot_telegram.ultimos_mensajes) if bot_telegram else [],
                          ultimos_errores=list(bot_telegram.errores) if bot_telegram else []),

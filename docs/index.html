@@ -66,7 +66,8 @@
 
   <h2>Qué hace</h2>
   <div class="rejilla">
-    <div class="tarjeta"><h3>🔗 Productos o categorías</h3><p>Pega el enlace de un producto, o el de una categoría u oferta para bajarlos todos.</p></div>
+    <div class="tarjeta"><h3>🌐 Webs enteras</h3><p>Dale la web del supermercado y encuentra y descarga sus productos, con cantidad y filtro.</p></div>
+    <div class="tarjeta"><h3>🔗 Productos o categorías</h3><p>O pega el enlace de un producto o de una categoría u oferta.</p></div>
     <div class="tarjeta"><h3>📦 ZIP, CSV y JSON</h3><p>Imágenes en carpetas por producto y una tabla que se abre en Excel.</p></div>
     <div class="tarjeta"><h3>📱 Pensado para el móvil</h3><p>App web que se añade a la pantalla de inicio, o bot de Telegram.</p></div>
     <div class="tarjeta"><h3>🤝 Uso responsable</h3><p>Respeta <code>robots.txt</code>, espera entre peticiones y avisa si una web lo bloquea.</p></div>
@@ -103,7 +104,7 @@ cd bot-citas
 cp .env.ejemplo .env      # pega el token en TELEGRAM_TOKEN
 ./iniciar.sh telegram</pre></li>
       <li>Escríbele <code>/yo</code> a tu bot y pon ese número en <code>TELEGRAM_USUARIOS</code> para que solo tú puedas usarlo.</li>
-      <li>Envíale un enlace de producto, o <code>/categoria &lt;enlace&gt;</code>.</li>
+      <li>Escanea una web entera con <code>/web https://www.ahorramas.com 500</code> (añade palabras para filtrar, p. ej. <code>leche</code>), o envíale un enlace de producto. <code>/parar</code> detiene un escaneo.</li>
     </ol>
   </details>
 

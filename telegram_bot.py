@@ -30,21 +30,32 @@ from pathlib import Path
 import requests
 
 from scraper.descargador import Descargador
-from scraper.servicio import comprimir, guardar, scrapear, url_publica
+from scraper.servicio import comprimir_por_partes, guardar, scrapear, url_publica
 
 API = os.environ.get("TELEGRAM_API", "https://api.telegram.org")
 MAX_PRODUCTOS = int(os.environ.get("BOT_MAX_PRODUCTOS", "40"))
 LIMITE_TRABAJO = int(os.environ.get("BOT_LIMITE_TRABAJO", "240"))  # segundos
+LIMITE_ESCANEO = int(os.environ.get("BOT_LIMITE_ESCANEO", str(8 * 3600)))  # segundos
+MAX_ESCANEO = int(os.environ.get("BOT_MAX_ESCANEO", "5000"))
+ESCANEO_POR_DEFECTO = 200
+FICHAS_MAXIMAS = 10  # con más productos se envía un resumen y las tablas
 URL_RE = re.compile(r"https?://[^\s<>\"']+")
 
 AYUDA = (
     "🛒 *SuperBot*\n"
     "Descargo título, descripción, precio e imágenes de productos de supermercado.\n\n"
+    "*Escanear una web entera*\n"
+    "`/web <enlace> [cantidad] [filtro]`\n"
+    "  · `/web https://www.ahorramas.com` → 200 productos\n"
+    "  · `/web https://www.lidl.es 1000`\n"
+    "  · `/web https://www.ahorramas.com todos leche` → todos los que contengan «leche»\n"
+    "`/parar` detiene el escaneo y te envía lo descargado hasta ese momento.\n\n"
+    "*Otras formas*\n"
     "• Pega uno o varios *enlaces de producto* y te envío cada ficha.\n"
-    "• `/categoria <enlace> [máx]`: todos los productos de una categoría, oferta o búsqueda.\n"
-    "• `/opciones`: ver o cambiar opciones (imágenes, modo navegador).\n"
+    "• `/categoria <enlace> [máx]`: los productos de una categoría, oferta o búsqueda.\n"
+    "• `/opciones`: imágenes, modo navegador…\n"
     "• `/yo`: tu id de usuario.\n\n"
-    "Al terminar te envío un ZIP con las imágenes, el CSV (Excel) y el JSON."
+    "Te envío los resultados en CSV (Excel) y JSON, y las imágenes en ZIP."
 )
 
 
@@ -80,6 +91,26 @@ class Telegram:
             pass  # "message is not modified", etc.
 
 
+def _duracion(segundos: float) -> str:
+    m = int(segundos // 60)
+    return f"{m // 60} h {m % 60} min" if m >= 60 else (f"{m} min" if m else f"{int(segundos)} s")
+
+
+def resumen(productos: list[dict], muestra: int = 8) -> str:
+    con_precio = [p for p in productos if p.get("precio") is not None]
+    lineas = [f"*Resumen:* {len(productos)} productos, {len(con_precio)} con precio."]
+    if con_precio:
+        precios = sorted(p["precio"] for p in con_precio)
+        lineas.append(f"Precio mínimo {precios[0]:.2f} · medio {sum(precios) / len(precios):.2f} · "
+                      f"máximo {precios[-1]:.2f}".replace(".", ","))
+    lineas.append("\n*Algunos productos:*")
+    for p in productos[:muestra]:
+        precio = f"{p['precio']:.2f} €".replace(".", ",") if p.get("precio") is not None else "sin precio"
+        lineas.append(f"• {escapar_md((p.get('titulo') or '(sin título)')[:70])} — {precio}")
+    lineas.append("\nLa lista completa va en los ficheros de abajo.")
+    return "\n".join(lineas)
+
+
 def escapar_md(t: str) -> str:
     return re.sub(r"([_*`\[])", r"\\\1", t or "")
 
@@ -102,7 +133,8 @@ class Bot:
         self.tg = Telegram(token)
         self.permitidos = permitidos
         self.opciones: dict[int, dict] = {}
-        self.ocupado: dict[int, tuple[float, int]] = {}  # chat -> (inicio, id del trabajo)
+        self.ocupado: dict[int, tuple[float, int, int]] = {}  # chat -> (inicio, id, límite en s)
+        self.paradas: dict[int, threading.Event] = {}
         self._siguiente_id = 0
         self.carpeta = Path(tempfile.gettempdir()) / "superbot-telegram"
         self.errores: deque[str] = deque(maxlen=10)  # se ven en /api/diagnostico
@@ -121,7 +153,8 @@ class Bot:
                 pass
 
     def ops(self, chat):
-        return self.opciones.setdefault(chat, {"imagenes": True, "navegador": False, "max_imagenes": 5})
+        return self.opciones.setdefault(chat, {"imagenes": True, "imagenes_web": False,
+                                               "navegador": False, "max_imagenes": 5})
 
     # ---------- Arranque ----------
     def preparar(self):
@@ -186,6 +219,11 @@ class Bot:
             return self.tg.texto(chat, AYUDA, markdown=True)
         if comando == "/opciones":
             return self.cambiar_opciones(chat, texto)
+        if comando in ("/parar", "/stop", "/cancelar"):
+            if chat in self.ocupado and chat in self.paradas:
+                self.paradas[chat].set()
+                return self.tg.texto(chat, "⏹ Parando… en unos segundos te envío lo descargado hasta ahora.")
+            return self.tg.texto(chat, "No hay nada en marcha.")
 
         urls = [u.rstrip(".,;)") for u in URL_RE.findall(texto)]
         for ent in (msg.get("entities") or []) + (msg.get("caption_entities") or []):
@@ -195,92 +233,152 @@ class Bot:
         if malas := [u for u in urls if not url_publica(u)]:
             return self.tg.texto(chat, f"URL no válida: {malas[0]}")
         if not urls:
-            return self.tg.texto(chat, "Envíame un enlace de producto, o usa /categoria <enlace>. /ayuda para más info.")
+            return self.tg.texto(chat, "Envíame un enlace de producto, o usa /web <enlace> para escanear "
+                                       "una web entera. /ayuda para más info.")
         if chat in self.ocupado:
-            inicio, _ = self.ocupado[chat]
-            if time.time() - inicio < LIMITE_TRABAJO:
-                return self.tg.texto(chat, "⏳ Todavía estoy con tu petición anterior, espera a que termine.")
+            inicio, _, limite = self.ocupado[chat]
+            if time.time() - inicio < limite:
+                return self.tg.texto(chat, "⏳ Todavía estoy con tu petición anterior. Espera a que termine "
+                                           "o usa /parar.")
             self.registrar_error("trabajo", TimeoutError(
-                f"la petición anterior lleva más de {LIMITE_TRABAJO // 60} min; se descarta"))
+                f"la petición anterior lleva más de {limite // 60} min; se descarta"))
             self.tg.texto(chat, "⚠️ La petición anterior se había quedado atascada; la descarto y sigo con esta.")
+            if chat in self.paradas:
+                self.paradas[chat].set()
             self.ocupado.pop(chat, None)
 
-        if comando == "/categoria":
+        extra = {}
+        limite = LIMITE_TRABAJO
+        if comando in ("/web", "/escanear", "/todo"):
+            resto = URL_RE.sub(" ", texto).split()[1:]
+            maximo = ESCANEO_POR_DEFECTO
+            palabras = []
+            for t in resto:
+                if t.isdigit():
+                    maximo = int(t)
+                elif t.lower() in ("todo", "todos", "all"):
+                    maximo = MAX_ESCANEO
+                else:
+                    palabras.append(t)
+            maximo = max(1, min(maximo, MAX_ESCANEO))
+            extra = {"sitios": urls[:1], "max_escaneo": maximo, "filtro": " ".join(palabras) or None}
+            args = ([], [], maximo)
+            limite = LIMITE_ESCANEO
+        elif comando == "/categoria":
             m = re.search(r"\s(\d+)\s*$", texto)
             maximo = min(int(m.group(1)), MAX_PRODUCTOS) if m else 20
             args = ([], urls[:1], maximo)
         else:
             args = (urls[:MAX_PRODUCTOS], [], MAX_PRODUCTOS)
         self._siguiente_id += 1
-        self.ocupado[chat] = (time.time(), self._siguiente_id)
+        self.ocupado[chat] = (time.time(), self._siguiente_id, limite)
+        self.paradas[chat] = threading.Event()
         threading.Thread(target=self.trabajo_seguro, args=(chat, self._siguiente_id, *args),
-                         daemon=True, name=f"trabajo-chat-{chat}").start()
+                         kwargs=extra, daemon=True, name=f"trabajo-chat-{chat}").start()
 
-    def trabajo_seguro(self, chat, tid, *args):
+    def trabajo_seguro(self, chat, tid, *args, **kwargs):
         try:
-            self.trabajo(chat, *args)
+            self.trabajo(chat, *args, **kwargs)
         except Exception as e:  # noqa: BLE001
             self.registrar_error("trabajo", e, chat)
         finally:
-            if self.ocupado.get(chat, (0, None))[1] == tid:  # no liberar un trabajo más nuevo
+            if self.ocupado.get(chat, (0, None, 0))[1] == tid:  # no liberar un trabajo más nuevo
                 self.ocupado.pop(chat, None)
+                self.paradas.pop(chat, None)
 
     def cambiar_opciones(self, chat, texto):
         o = self.ops(chat)
         partes = texto.split()[1:]
-        if len(partes) == 2 and partes[0] in ("imagenes", "navegador"):
+        if len(partes) == 2 and partes[0] in ("imagenes", "imagenes_web", "navegador"):
             o[partes[0]] = partes[1].lower() in ("si", "sí", "on", "1", "true")
         elif len(partes) == 2 and partes[0] == "max_imagenes" and partes[1].isdigit():
             o["max_imagenes"] = max(1, min(int(partes[1]), 10))
-        si = lambda v: "sí" if v else "no"
+        si = lambda v: "sí" if v else "no"  # noqa: E731
         self.tg.texto(chat,
             "⚙️ Opciones actuales:\n"
-            f"• imagenes: {si(o['imagenes'])}\n• navegador: {si(o['navegador'])}\n"
+            f"• imagenes: {si(o['imagenes'])} (enlaces y categorías)\n"
+            f"• imagenes_web: {si(o['imagenes_web'])} (escaneos con /web; con miles de productos ocupan mucho)\n"
+            f"• navegador: {si(o['navegador'])}\n"
             f"• max_imagenes: {o['max_imagenes']}\n\n"
-            "Para cambiarlas, por ejemplo:\n/opciones imagenes no\n/opciones navegador si\n/opciones max_imagenes 3")
+            "Para cambiarlas, por ejemplo:\n/opciones imagenes no\n/opciones imagenes_web si\n"
+            "/opciones navegador si\n/opciones max_imagenes 1\n\n"
+            "Sin imágenes descargadas, el CSV incluye igualmente los enlaces a las fotos.")
 
     # ---------- Scraping ----------
-    def trabajo(self, chat, urls, categorias, maximo):
+    def trabajo(self, chat, urls, categorias, maximo, sitios=None, max_escaneo=None, filtro=None):
         o = self.ops(chat)
+        escaneo = bool(sitios)
         salida = self.carpeta / f"{chat}-{int(time.time())}"
-        progreso = self.tg.texto(chat, "⏳ Empezando…")
+        progreso = self.tg.texto(chat, "⏳ Buscando los productos de la web…" if escaneo else "⏳ Empezando…")
         lineas: list[str] = []
         ultima_edicion = [0.0]
+        estado = {"hecho": 0, "total": 0, "inicio_descarga": None}
 
         def log(m):
             lineas.append(m)
-            if time.time() - ultima_edicion[0] > 3:  # no saturar la API
+            if m.startswith("["):
+                try:
+                    hecho, total = m[1:m.index("]")].split("/")
+                    estado.update(hecho=int(hecho), total=int(total))
+                    estado["inicio_descarga"] = estado["inicio_descarga"] or time.time()
+                except ValueError:
+                    pass
+            if time.time() - ultima_edicion[0] > 4:  # no saturar la API de Telegram
                 ultima_edicion[0] = time.time()
-                self.tg.editar(chat, progreso["message_id"], "⏳ Trabajando…\n" + "\n".join(lineas[-8:]))
+                cabecera = "⏳ Trabajando…"
+                if estado["total"]:
+                    h, t = estado["hecho"], estado["total"]
+                    cabecera = f"⏳ Descargando {h}/{t} productos"
+                    if h > 3:
+                        quedan = (time.time() - estado["inicio_descarga"]) / (h - 1) * (t - h)
+                        cabecera += f" · quedan ~{_duracion(quedan)}"
+                    if escaneo:
+                        cabecera += "\n(/parar para detener y recibir lo descargado)"
+                del lineas[:-6]
+                self.tg.editar(chat, progreso["message_id"], cabecera + "\n\n" + "\n".join(l[:120] for l in lineas))
 
         d = Descargador(usar_navegador=o["navegador"])
         try:
+            imagenes = o["imagenes_web"] if escaneo else o["imagenes"]
             productos, errores = scrapear(urls, categorias, salida, max_por_categoria=maximo,
-                                          descargar_imagenes=o["imagenes"],
-                                          max_imagenes=o["max_imagenes"], descargador=d, log=log)
+                                          descargar_imagenes=imagenes, max_imagenes=o["max_imagenes"],
+                                          descargador=d, log=log, sitios=sitios,
+                                          max_escaneo=max_escaneo or maximo, filtro=filtro,
+                                          parar=self.paradas.get(chat))
             guardar(productos, salida)
             n = len(productos)
+            parado = bool(self.paradas.get(chat) and self.paradas[chat].is_set())
             self.tg.editar(chat, progreso["message_id"],
-                           f"✅ {n} producto{'s' if n != 1 else ''} descargado{'s' if n != 1 else ''}"
-                           if n else "⚠️ No se obtuvo ningún producto")
-            for p in productos:
-                self.enviar_producto(chat, p, salida)
+                           (f"{'⏹' if parado else '✅'} {n} producto{'s' if n != 1 else ''} "
+                            f"descargado{'s' if n != 1 else ''}") if n else "⚠️ No se obtuvo ningún producto")
+            if n <= FICHAS_MAXIMAS:
+                for p in productos:
+                    self.enviar_producto(chat, p, salida)
+            else:
+                self.tg.texto(chat, resumen(productos), markdown=True)
             if errores:
-                self.tg.texto(chat, "⚠️ Problemas:\n" + "\n".join(f"• {e}" for e in errores[:10]))
+                self.tg.texto(chat, f"⚠️ Problemas ({len(errores)}):\n" + "\n".join(f"• {e[:200]}" for e in errores[:8]))
             if n:
-                zip_bytes = comprimir(salida)
-                if len(zip_bytes) < 48 * 1024 * 1024:  # límite de Telegram para bots: 50 MB
-                    self.tg.llamar("sendDocument", chat_id=chat, caption="📦 Imágenes + CSV + JSON",
-                                   files={"document": ("productos.zip", zip_bytes, "application/zip")},
-                                   timeout=300)
-                else:
-                    self.tg.llamar("sendDocument", chat_id=chat, caption="El ZIP supera 50 MB; te envío el CSV",
-                                   files={"document": ("productos.csv", (salida / "productos.csv").read_bytes())})
+                self.enviar_resultados(chat, salida, n, imagenes)
         except Exception as e:  # noqa: BLE001
             self.registrar_error("descarga", e, chat)
         finally:
             d.cerrar()
             shutil.rmtree(salida, ignore_errors=True)
+
+    def enviar_resultados(self, chat, salida: Path, n: int, con_imagenes: bool):
+        for nombre, desc in (("productos.csv", "📊 Tabla para Excel"), ("productos.json", "🗂 Datos en JSON")):
+            with open(salida / nombre, "rb") as f:
+                self.tg.llamar("sendDocument", chat_id=chat, caption=f"{desc} · {n} productos",
+                               files={"document": (nombre, f)}, timeout=300)
+        if con_imagenes and (salida / "imagenes").exists():
+            partes = comprimir_por_partes(salida / "imagenes", salida.parent / f"{salida.name}-imagenes.zip")
+            for i, parte in enumerate(partes, 1):
+                with open(parte, "rb") as f:
+                    nombre = "imagenes.zip" if len(partes) == 1 else f"imagenes-parte{i}de{len(partes)}.zip"
+                    self.tg.llamar("sendDocument", chat_id=chat, caption=f"🖼 Imágenes ({i}/{len(partes)})",
+                                   files={"document": (nombre, f)}, timeout=600)
+                parte.unlink(missing_ok=True)
 
     def enviar_producto(self, chat, p, salida: Path):
         texto = ficha(p)

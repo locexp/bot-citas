@@ -160,3 +160,32 @@ def test_telegram_nunca_se_queda_callado(monkeypatch):
     target(*args)
     assert any("fallo de prueba" in t for t in bot.tg.enviados)
     assert 7 not in bot.ocupado and bot.errores
+
+
+def test_rastreador_sitemaps(monkeypatch):
+    from scraper import rastreador
+    ficheros = {
+        "https://s.es/sitemap_index.xml": b"<sitemapindex><sitemap><loc>https://s.es/sitemap-categories.xml</loc></sitemap>"
+            b"<sitemap><loc>https://s.es/sitemap-products-1.xml.gz</loc></sitemap></sitemapindex>",
+        "https://s.es/sitemap-products-1.xml.gz": b"<urlset><url><loc>https://s.es/leche-entera-1l-1.html</loc></url>"
+            b"<url><loc>https://s.es/pan-blanco-2.html</loc></url><url><loc>https://otra.com/x</loc></url></urlset>",
+        "https://s.es/sitemap-categories.xml": b"<urlset><url><loc>https://s.es/c/lacteos</loc></url></urlset>",
+    }
+
+    class D:
+        def robots(self, url):
+            class R:
+                def site_maps(self):
+                    return ["https://s.es/sitemap_index.xml"]
+            return R()
+
+        def contenido(self, url):
+            return ficheros[url]
+    leidos = []
+    orig = rastreador._leer_sitemap
+    monkeypatch.setattr(rastreador, "_leer_sitemap", lambda d, u, b: leidos.append(u) or orig(d, u, b))
+    r = rastreador.descubrir_productos(D(), "https://s.es/", 10, log=lambda m: None)
+    assert r == ["https://s.es/leche-entera-1l-1.html", "https://s.es/pan-blanco-2.html"]
+    assert "https://s.es/sitemap-categories.xml" not in leidos
+    assert rastreador.descubrir_productos(D(), "https://s.es/", 10, filtro="Léche", log=lambda m: None) == \
+        ["https://s.es/leche-entera-1l-1.html"]

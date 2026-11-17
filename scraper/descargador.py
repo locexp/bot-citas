@@ -56,11 +56,39 @@ class Descargador:
         self._pw = self._navegador = None
 
     # ---- control ----
-    def _esperar(self):
-        resto = self.pausa - (time.time() - self._ultima)
+    def _esperar(self, url: str | None = None):
+        pausa = self.pausa
+        if url and self.respetar_robots:
+            rp = self._robots.get("{0.scheme}://{0.netloc}".format(urlparse(url)))
+            try:
+                demora = rp.crawl_delay(USER_AGENT) if rp else None
+            except Exception:  # noqa: BLE001
+                demora = None
+            if demora:
+                pausa = max(pausa, float(demora))  # Crawl-delay pedido por la web
+        resto = pausa - (time.time() - self._ultima)
         if resto > 0:
             time.sleep(resto)
         self._ultima = time.time()
+
+    def robots(self, url: str) -> RobotFileParser | None:
+        self.permitido(url)
+        return self._robots.get("{0.scheme}://{0.netloc}".format(urlparse(url)))
+
+    def contenido(self, url: str) -> bytes:
+        """Descarga un fichero (p. ej. un sitemap .xml o .xml.gz) y lo devuelve descomprimido."""
+        import gzip
+        if not self.permitido(url):
+            raise PermissionError(f"robots.txt no permite acceder a {url}")
+        self._esperar(url)
+        r = self.sesion.get(url, timeout=self.timeout * 3)
+        if not r.ok:
+            comprobar_bloqueo(r.status_code, r.text, url)
+            r.raise_for_status()
+        datos = r.content
+        if datos[:2] == b"\x1f\x8b":
+            datos = gzip.decompress(datos)
+        return datos
 
     def permitido(self, url: str) -> bool:
         if not self.respetar_robots:
@@ -82,7 +110,7 @@ class Descargador:
     def html(self, url: str) -> str:
         if not self.permitido(url):
             raise PermissionError(f"robots.txt no permite acceder a {url}")
-        self._esperar()
+        self._esperar(url)
         if self.usar_navegador:
             return self._html_navegador(url)
         r = self.sesion.get(url, timeout=self.timeout)
@@ -121,7 +149,7 @@ class Descargador:
     def imagen(self, url: str, carpeta: Path, prefijo: str) -> str | None:
         carpeta.mkdir(parents=True, exist_ok=True)
         try:
-            self._esperar()
+            self._esperar(url)
             r = self.sesion.get(url, timeout=self.timeout, stream=True)
             r.raise_for_status()
         except requests.RequestException as e:
