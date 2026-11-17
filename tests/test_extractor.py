@@ -124,3 +124,39 @@ def test_descripcion_no_coge_promociones():
     html = """<h1>Activia</h1><div class="product-info-promotions__with-description">Ahora más barato
     Oferta desde 21/10/2026 hasta 18/11/2026 bla bla</div><div class="product-data__description"></div>"""
     assert extraer_producto(html, "https://s.es/p/a/1").descripcion is None
+
+
+class _TelegramFalso:
+    def __init__(self):
+        self.enviados = []
+
+    def texto(self, chat, txt, markdown=False, **kw):
+        self.enviados.append(txt)
+        return {"message_id": 1}
+
+    def llamar(self, *a, **kw):
+        return {"message_id": 1}
+
+    def editar(self, *a, **kw):
+        pass
+
+
+def test_telegram_nunca_se_queda_callado(monkeypatch):
+    import telegram_bot
+    bot = telegram_bot.Bot("x", {99})
+    bot.tg = _TelegramFalso()
+
+    def explota(*a, **kw):
+        raise RuntimeError("fallo de prueba")
+    monkeypatch.setattr(bot, "trabajo", explota)
+    hilos = []
+    monkeypatch.setattr(telegram_bot.threading, "Thread",
+                        lambda target, args, daemon: hilos.append((target, args)) or type("T", (), {"start": lambda s: None})())
+    msg = {"chat": {"id": 7}, "from": {"id": 99}, "text": "Mira esto",
+           "entities": [{"type": "text_link", "offset": 0, "length": 9, "url": "https://www.ahorramas.com/x-12345.html"}]}
+    bot.procesar({"message": msg})
+    assert hilos, "el enlace oculto (text_link) debe lanzar la descarga"
+    target, args = hilos[0]
+    target(*args)
+    assert any("fallo de prueba" in t for t in bot.tg.enviados)
+    assert 7 not in bot.ocupado and bot.errores

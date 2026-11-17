@@ -13,6 +13,8 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.8
+      - key: PYTHONUNBUFFERED   # que los mensajes salgan al momento en "Logs"
+        value: "1"
       - key: BOT_CLAVE          # clave de la app; Render la genera y la ves en "Environment"
         generateValue: true
       - key: TELEGRAM_TOKEN     # opcional: token de @BotFather

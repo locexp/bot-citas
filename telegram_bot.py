@@ -23,6 +23,8 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
+from collections import deque
 from pathlib import Path
 
 import requests
@@ -101,6 +103,20 @@ class Bot:
         self.opciones: dict[int, dict] = {}
         self.ocupado: set[int] = set()
         self.carpeta = Path(tempfile.gettempdir()) / "superbot-telegram"
+        self.errores: deque[str] = deque(maxlen=10)  # se ven en /api/diagnostico
+        self.ultimos_mensajes: deque[str] = deque(maxlen=10)
+
+    def registrar_error(self, donde: str, e: Exception, chat=None):
+        detalle = "".join(traceback.format_exception_only(type(e), e)).strip()
+        linea = f"{time.strftime('%H:%M:%S')} {donde}: {detalle}"
+        self.errores.append(linea)
+        print(linea, flush=True)
+        traceback.print_exc()
+        if chat is not None:
+            try:
+                self.tg.texto(chat, f"❌ Error interno ({donde}): {detalle[:300]}")
+            except Exception:  # noqa: BLE001
+                pass
 
     def ops(self, chat):
         return self.opciones.setdefault(chat, {"imagenes": True, "navegador": False, "max_imagenes": 5})
@@ -126,11 +142,15 @@ class Bot:
         print(f"Bot de Telegram @{yo['username']} activo (webhook).")
 
     def procesar(self, update: dict):
-        if msg := update.get("message"):
-            try:
-                self.atender(msg)
-            except Exception as e:  # noqa: BLE001
-                print("Error atendiendo mensaje:", e)
+        msg = update.get("message") or update.get("edited_message")
+        if not msg:
+            return
+        texto = (msg.get("text") or msg.get("caption") or "")
+        self.ultimos_mensajes.append(f"{time.strftime('%H:%M:%S')} chat {msg.get('chat', {}).get('id')}: {texto[:80]!r}")
+        try:
+            self.atender(msg)
+        except Exception as e:  # noqa: BLE001
+            self.registrar_error("atender", e, msg.get("chat", {}).get("id"))
 
     def ejecutar(self):
         """Modo local: consulta a Telegram cada pocos segundos (long polling)."""
@@ -166,6 +186,10 @@ class Bot:
             return self.cambiar_opciones(chat, texto)
 
         urls = [u.rstrip(".,;)") for u in URL_RE.findall(texto)]
+        for ent in (msg.get("entities") or []) + (msg.get("caption_entities") or []):
+            if ent.get("type") == "text_link" and ent.get("url"):
+                urls.append(ent["url"])
+        urls = list(dict.fromkeys(urls))
         if malas := [u for u in urls if not url_publica(u)]:
             return self.tg.texto(chat, f"URL no válida: {malas[0]}")
         if not urls:
@@ -180,7 +204,15 @@ class Bot:
         else:
             args = (urls[:MAX_PRODUCTOS], [], MAX_PRODUCTOS)
         self.ocupado.add(chat)
-        threading.Thread(target=self.trabajo, args=(chat, *args), daemon=True).start()
+        threading.Thread(target=self.trabajo_seguro, args=(chat, *args), daemon=True).start()
+
+    def trabajo_seguro(self, chat, *args):
+        try:
+            self.trabajo(chat, *args)
+        except Exception as e:  # noqa: BLE001
+            self.registrar_error("trabajo", e, chat)
+        finally:
+            self.ocupado.discard(chat)
 
     def cambiar_opciones(self, chat, texto):
         o = self.ops(chat)
@@ -234,7 +266,7 @@ class Bot:
                     self.tg.llamar("sendDocument", chat_id=chat, caption="El ZIP supera 50 MB; te envío el CSV",
                                    files={"document": ("productos.csv", (salida / "productos.csv").read_bytes())})
         except Exception as e:  # noqa: BLE001
-            self.tg.texto(chat, f"❌ Error: {e}")
+            self.registrar_error("descarga", e, chat)
         finally:
             d.cerrar()
             self.ocupado.discard(chat)

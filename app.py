@@ -241,7 +241,10 @@ def diagnostico():
         "url_publica": URL_PUBLICA or None,
         "clave_activada": bool(CLAVE),
         "trabajos_en_memoria": len(trabajos),
-        "telegram": dict(ESTADO_TG, usuarios_permitidos=len(bot_telegram.permitidos) if bot_telegram else 0),
+        "telegram": dict(ESTADO_TG, usuarios_permitidos=len(bot_telegram.permitidos) if bot_telegram else 0,
+                         ocupado=list(bot_telegram.ocupado) if bot_telegram else [],
+                         ultimos_mensajes=list(bot_telegram.ultimos_mensajes) if bot_telegram else [],
+                         ultimos_errores=list(bot_telegram.errores) if bot_telegram else []),
     }
     if bot_telegram:
         try:
