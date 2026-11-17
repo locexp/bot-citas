@@ -11,7 +11,8 @@ escribe su dirección. También vale `…/app/?servidor=http://localhost:8000`.
 
 La web está en la carpeta `docs/` (`docs/index.html` es la presentación y `docs/app/` la
 app, que es la misma que sirve `app.py`). Para activarla la primera vez: en GitHub,
-**Settings → Pages → Source: Deploy from a branch → rama `ccr-962fb0fd-stdhyu`, carpeta `/docs`**.
+**Settings → Pages → Source: Deploy from a branch → rama `ccr-962fb0fd-stdhyu`** y carpeta `/docs`
+(o `/ (root)`: el `index.html` de la raíz redirige a `docs/`).
 Después, cada cambio que se suba a `docs/` se publica solo.
 
 Por seguridad, el bot solo acepta peticiones de otras webs si vienen de `*.github.io` o de
