@@ -34,6 +34,7 @@ from scraper.servicio import comprimir, guardar, scrapear, url_publica
 
 API = os.environ.get("TELEGRAM_API", "https://api.telegram.org")
 MAX_PRODUCTOS = int(os.environ.get("BOT_MAX_PRODUCTOS", "40"))
+LIMITE_TRABAJO = int(os.environ.get("BOT_LIMITE_TRABAJO", "240"))  # segundos
 URL_RE = re.compile(r"https?://[^\s<>\"']+")
 
 AYUDA = (
@@ -101,7 +102,8 @@ class Bot:
         self.tg = Telegram(token)
         self.permitidos = permitidos
         self.opciones: dict[int, dict] = {}
-        self.ocupado: set[int] = set()
+        self.ocupado: dict[int, tuple[float, int]] = {}  # chat -> (inicio, id del trabajo)
+        self._siguiente_id = 0
         self.carpeta = Path(tempfile.gettempdir()) / "superbot-telegram"
         self.errores: deque[str] = deque(maxlen=10)  # se ven en /api/diagnostico
         self.ultimos_mensajes: deque[str] = deque(maxlen=10)
@@ -195,7 +197,13 @@ class Bot:
         if not urls:
             return self.tg.texto(chat, "Envíame un enlace de producto, o usa /categoria <enlace>. /ayuda para más info.")
         if chat in self.ocupado:
-            return self.tg.texto(chat, "⏳ Todavía estoy con tu petición anterior, espera a que termine.")
+            inicio, _ = self.ocupado[chat]
+            if time.time() - inicio < LIMITE_TRABAJO:
+                return self.tg.texto(chat, "⏳ Todavía estoy con tu petición anterior, espera a que termine.")
+            self.registrar_error("trabajo", TimeoutError(
+                f"la petición anterior lleva más de {LIMITE_TRABAJO // 60} min; se descarta"))
+            self.tg.texto(chat, "⚠️ La petición anterior se había quedado atascada; la descarto y sigo con esta.")
+            self.ocupado.pop(chat, None)
 
         if comando == "/categoria":
             m = re.search(r"\s(\d+)\s*$", texto)
@@ -203,16 +211,19 @@ class Bot:
             args = ([], urls[:1], maximo)
         else:
             args = (urls[:MAX_PRODUCTOS], [], MAX_PRODUCTOS)
-        self.ocupado.add(chat)
-        threading.Thread(target=self.trabajo_seguro, args=(chat, *args), daemon=True).start()
+        self._siguiente_id += 1
+        self.ocupado[chat] = (time.time(), self._siguiente_id)
+        threading.Thread(target=self.trabajo_seguro, args=(chat, self._siguiente_id, *args),
+                         daemon=True, name=f"trabajo-chat-{chat}").start()
 
-    def trabajo_seguro(self, chat, *args):
+    def trabajo_seguro(self, chat, tid, *args):
         try:
             self.trabajo(chat, *args)
         except Exception as e:  # noqa: BLE001
             self.registrar_error("trabajo", e, chat)
         finally:
-            self.ocupado.discard(chat)
+            if self.ocupado.get(chat, (0, None))[1] == tid:  # no liberar un trabajo más nuevo
+                self.ocupado.pop(chat, None)
 
     def cambiar_opciones(self, chat, texto):
         o = self.ops(chat)
@@ -269,7 +280,6 @@ class Bot:
             self.registrar_error("descarga", e, chat)
         finally:
             d.cerrar()
-            self.ocupado.discard(chat)
             shutil.rmtree(salida, ignore_errors=True)
 
     def enviar_producto(self, chat, p, salida: Path):

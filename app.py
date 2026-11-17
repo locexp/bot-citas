@@ -213,7 +213,7 @@ if TELEGRAM_TOKEN:
                 print(f"No se pudo arrancar el bot de Telegram (intento {intento + 1}/5):", e, flush=True)
                 time.sleep(10)
 
-    threading.Thread(target=_arrancar_telegram, daemon=True).start()
+    threading.Thread(target=_arrancar_telegram, daemon=True, name="arranque-telegram").start()
 
 
 @app.post("/telegram/<secreto>")
@@ -233,6 +233,24 @@ def salud():
     return "ok"
 
 
+def hilos_en_espera() -> dict:
+    """Dónde está esperando cada hilo (solo archivo:línea y función, sin datos)."""
+    import sys
+    import traceback as tb
+    nombres = {t.ident: t.name for t in threading.enumerate()}
+    salida = {}
+    for ident, marco in sys._current_frames().items():
+        nombre = nombres.get(ident, str(ident))
+        if nombre.startswith(("MainThread", "ThreadPool")) or "gthread" in nombre:
+            continue
+        pila = [f"{Path(f.filename).name}:{f.lineno} {f.name}" for f in tb.extract_stack(marco)]
+        propias = [p for p in pila if p.split(":")[0] in
+                   ("app.py", "telegram_bot.py", "servicio.py", "descargador.py", "extractor.py")]
+        if propias:
+            salida[nombre] = propias[-4:] + [pila[-1]]
+    return salida
+
+
 @app.get("/api/diagnostico")
 def diagnostico():
     """Estado del servidor para encontrar problemas (no muestra claves ni tokens)."""
@@ -242,7 +260,8 @@ def diagnostico():
         "clave_activada": bool(CLAVE),
         "trabajos_en_memoria": len(trabajos),
         "telegram": dict(ESTADO_TG, usuarios_permitidos=len(bot_telegram.permitidos) if bot_telegram else 0,
-                         ocupado=list(bot_telegram.ocupado) if bot_telegram else [],
+                         ocupado={str(c): f"{int(time.time() - t)} s" for c, (t, _) in bot_telegram.ocupado.items()}
+                         if bot_telegram else {},
                          ultimos_mensajes=list(bot_telegram.ultimos_mensajes) if bot_telegram else [],
                          ultimos_errores=list(bot_telegram.errores) if bot_telegram else []),
     }
@@ -258,6 +277,7 @@ def diagnostico():
             }
         except Exception as e:  # noqa: BLE001
             info["telegram"]["webhook"] = {"error_consultando": str(e)}
+    info["hilos"] = hilos_en_espera()
     try:
         r = requests.get("https://www.ahorramas.com/robots.txt", timeout=15)
         info["internet"] = f"ok ({r.status_code})"

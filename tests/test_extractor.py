@@ -151,7 +151,7 @@ def test_telegram_nunca_se_queda_callado(monkeypatch):
     monkeypatch.setattr(bot, "trabajo", explota)
     hilos = []
     monkeypatch.setattr(telegram_bot.threading, "Thread",
-                        lambda target, args, daemon: hilos.append((target, args)) or type("T", (), {"start": lambda s: None})())
+                        lambda target, args, **kw: hilos.append((target, args)) or type("T", (), {"start": lambda s: None})())
     msg = {"chat": {"id": 7}, "from": {"id": 99}, "text": "Mira esto",
            "entities": [{"type": "text_link", "offset": 0, "length": 9, "url": "https://www.ahorramas.com/x-12345.html"}]}
     bot.procesar({"message": msg})
