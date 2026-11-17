@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1f7a4d">
+<title>SuperBot</title>
+<meta name="description" content="Bot que descarga título, descripción, precio e imágenes de productos de supermercados online. Desde el móvil, Telegram o la línea de comandos.">
+<link rel="icon" href="app/icono.svg">
+<style>
+  :root {
+    --fondo: #f4f6f3; --tarjeta: #ffffff; --texto: #1c2420; --suave: #5f6b64;
+    --borde: #dfe5e0; --acento: #1f7a4d; --acento-texto: #ffffff; --codigo: #eef2ef;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #111613; --tarjeta: #1b221e; --texto: #e7ece9; --suave: #9aa8a0;
+      --borde: #2c3630; --acento: #4fbf86; --acento-texto: #0b1a12; --codigo: #232c27;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--texto);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; gap: 12px; }
+  header img { width: 44px; height: 44px; }
+  header h1 { margin: 0; font-size: 1.7rem; }
+  .lema { font-size: 1.15rem; color: var(--suave); margin: 14px 0 20px; max-width: 60ch; }
+  .botones { display: flex; gap: 10px; flex-wrap: wrap; }
+  .boton { display: inline-block; text-decoration: none; font-weight: 700; padding: 13px 20px;
+    border-radius: 12px; border: 1px solid var(--acento); color: var(--acento); }
+  .boton.lleno { background: var(--acento); color: var(--acento-texto); }
+  h2 { font-size: 1.25rem; margin: 40px 0 12px; }
+  .rejilla { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 14px; padding: 16px; }
+  .tarjeta h3 { margin: 0 0 6px; font-size: 1.05rem; }
+  .tarjeta p { margin: 0; color: var(--suave); font-size: .95rem; }
+  .paso { margin: 0 0 12px; }
+  pre { background: var(--codigo); border-radius: 10px; padding: 12px; overflow-x: auto;
+    font: 13px/1.5 ui-monospace, Menlo, monospace; margin: 8px 0 0; }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
+  .aviso { border-left: 4px solid var(--acento); }
+  .tabla { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .95rem; background: var(--tarjeta);
+    border: 1px solid var(--borde); border-radius: 14px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
+  th { color: var(--suave); font-weight: 600; font-size: .85rem; }
+  tr:last-child td { border-bottom: 0; }
+  details { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; }
+  summary { font-weight: 700; cursor: pointer; }
+  details ol { padding-left: 20px; margin: 10px 0 0; }
+  details li { margin-bottom: 8px; }
+  footer { margin-top: 48px; color: var(--suave); font-size: .9rem; }
+  a { color: var(--acento); }
+</style>
+</head>
+<body>
+<main>
+  <header><img src="app/icono.svg" alt=""><h1>SuperBot</h1></header>
+  <p class="lema">Descarga el <strong>título, la descripción, el precio y las imágenes</strong> de productos
+    de supermercados online. Desde el móvil, por Telegram o desde la línea de comandos.</p>
+  <div class="botones">
+    <a class="boton lleno" href="app/">Abrir la app</a>
+    <a class="boton" href="https://github.com/locexp/bot-citas">Código en GitHub</a>
+  </div>
+
+  <h2>Qué hace</h2>
+  <div class="rejilla">
+    <div class="tarjeta"><h3>🔗 Productos o categorías</h3><p>Pega el enlace de un producto, o el de una categoría u oferta para bajarlos todos.</p></div>
+    <div class="tarjeta"><h3>📦 ZIP, CSV y JSON</h3><p>Imágenes en carpetas por producto y una tabla que se abre en Excel.</p></div>
+    <div class="tarjeta"><h3>📱 Pensado para el móvil</h3><p>App web que se añade a la pantalla de inicio, o bot de Telegram.</p></div>
+    <div class="tarjeta"><h3>🤝 Uso responsable</h3><p>Respeta <code>robots.txt</code>, espera entre peticiones y avisa si una web lo bloquea.</p></div>
+  </div>
+
+  <h2>Cómo empezar</h2>
+  <div class="tarjeta aviso paso">
+    <p><strong>Importante:</strong> esta página (GitHub Pages) solo aloja la interfaz. El bot que descarga los
+    datos tiene que estar funcionando en tu móvil, tu PC o un servidor. La primera vez que abras la app,
+    pulsa <strong>⚙ Servidor</strong> y escribe su dirección.</p>
+  </div>
+
+  <details open>
+    <summary>📱 En el móvil Android (Termux)</summary>
+    <ol>
+      <li>Instala <a href="https://f-droid.org/packages/com.termux/">Termux desde F-Droid</a>.</li>
+      <li>En Termux:
+        <pre>pkg install -y git
+git clone https://github.com/locexp/bot-citas.git
+cd bot-citas
+./iniciar.sh</pre></li>
+      <li>Abre <a href="app/?servidor=http://localhost:8000">la app</a> en Chrome. Se conectará a
+        <code>http://localhost:8000</code>. También puedes abrir esa dirección directamente.</li>
+    </ol>
+  </details>
+
+  <details>
+    <summary>✈️ Por Telegram</summary>
+    <ol>
+      <li>En Telegram, abre <strong>@BotFather</strong> → <code>/newbot</code> y copia el token.</li>
+      <li>En el ordenador o en Termux:
+        <pre>git clone https://github.com/locexp/bot-citas.git
+cd bot-citas
+cp .env.ejemplo .env      # pega el token en TELEGRAM_TOKEN
+./iniciar.sh telegram</pre></li>
+      <li>Escríbele <code>/yo</code> a tu bot y pon ese número en <code>TELEGRAM_USUARIOS</code> para que solo tú puedas usarlo.</li>
+      <li>Envíale un enlace de producto, o <code>/categoria &lt;enlace&gt;</code>.</li>
+    </ol>
+  </details>
+
+  <details>
+    <summary>💻 En tu PC (y usarlo desde el móvil)</summary>
+    <ol>
+      <li><pre>git clone https://github.com/locexp/bot-citas.git
+cd bot-citas
+pip install -r requirements.txt
+python app.py</pre></li>
+      <li>Abre en el móvil la dirección que aparece (por ejemplo <code>http://192.168.1.20:8000</code>), con el móvil en la misma wifi.</li>
+    </ol>
+  </details>
+
+  <details>
+    <summary>☁️ En un servidor (Render, Railway, VPS…)</summary>
+    <ol>
+      <li>Despliega el repositorio con el comando de inicio <code>python app.py</code> y pon la variable <code>BOT_CLAVE</code> con una clave.</li>
+      <li>En <a href="app/">la app</a>, pulsa <strong>⚙ Servidor</strong> y escribe la dirección <code>https://…</code> del servidor.</li>
+      <li>Ojo: muchas tiendas bloquean las conexiones de servidores en la nube. Desde casa o el móvil suele ir mejor.</li>
+    </ol>
+  </details>
+
+  <h2>Supermercados probados</h2>
+  <div class="tabla">
+    <table>
+      <thead><tr><th>Supermercado</th><th>Resultado</th></tr></thead>
+      <tbody>
+        <tr><td>Alcampo, Ahorramas, Lidl</td><td>✅ Funciona (productos y categorías)</td></tr>
+        <tr><td>Consum</td><td>✅ Con «modo navegador» (no disponible en Termux)</td></tr>
+        <tr><td>Mercadona</td><td>⛔ Su robots.txt no permite bots</td></tr>
+        <tr><td>MAS, Carrefour, Eroski, Dia, El Corte Inglés</td><td>🛡️ Bloqueadas desde servidores en la nube; pueden funcionar desde casa o el móvil</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="color:var(--suave);font-size:.9rem">Pruebas de noviembre de 2026. Las webs cambian a menudo.</p>
+
+  <footer>
+    Revisa los términos de uso de cada web antes de descargar sus datos y no la sobrecargues.
+  </footer>
+</main>
+</body>
+</html>

@@ -27,7 +27,34 @@ CLAVE = os.environ.get("BOT_CLAVE")
 MAX_PRODUCTOS = int(os.environ.get("BOT_MAX_PRODUCTOS", "40"))
 CADUCIDAD = 6 * 3600  # se borran los trabajos de más de 6 h
 
+# Orígenes web que pueden usar esta API desde otra página (p. ej. la app en GitHub Pages).
+# Por defecto: cualquier *.github.io y localhost. "*" = todos.
+ORIGENES = os.environ.get("BOT_ORIGENES", "https://*.github.io,http://localhost:*,http://127.0.0.1:*")
+
 app = Flask(__name__, static_folder=str(BASE / "web"), static_url_path="/static")
+
+
+def origen_permitido(origen: str) -> bool:
+    import fnmatch
+    return any(p.strip() == "*" or fnmatch.fnmatch(origen, p.strip()) for p in ORIGENES.split(","))
+
+
+@app.after_request
+def cors(resp):
+    origen = request.headers.get("Origin")
+    if origen and origen_permitido(origen):
+        resp.headers["Access-Control-Allow-Origin"] = origen
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Clave"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        # Chrome: permitir que una web pública hable con el bot en tu propia red/móvil
+        resp.headers["Access-Control-Allow-Private-Network"] = "true"
+    return resp
+
+
+@app.route("/api/<path:_ruta>", methods=["OPTIONS"])
+def preflight(_ruta):
+    return "", 204
 trabajos: dict[str, dict] = {}
 cerrojo = threading.Lock()
 
@@ -70,6 +97,11 @@ def inicio():
 def manifest():
     return send_from_directory(BASE / "web", "manifest.webmanifest",
                                mimetype="application/manifest+json")
+
+
+@app.get("/icono.svg")
+def icono():
+    return send_from_directory(BASE / "web", "icono.svg")
 
 
 @app.get("/api/estado")

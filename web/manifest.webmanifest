@@ -1,9 +1,9 @@
 {
   "name": "SuperBot - Productos de supermercado",
   "short_name": "SuperBot",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#f4f6f3",
   "theme_color": "#1f7a4d",
-  "icons": [{"src": "/static/icono.svg", "sizes": "any", "type": "image/svg+xml"}]
+  "icons": [{"src": "icono.svg", "sizes": "any", "type": "image/svg+xml"}]
 }

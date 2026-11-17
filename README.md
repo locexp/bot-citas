@@ -3,6 +3,18 @@
 Descarga **título, descripción, precio e imágenes** de productos de webs de supermercado.
 Se usa desde el **móvil** (app web) o desde la línea de comandos.
 
+## 🌐 Web del proyecto (GitHub Pages)
+**https://locexp.github.io/bot-citas/** tiene la presentación y las instrucciones, y en
+**/app/** la interfaz para el móvil. GitHub Pages solo aloja páginas estáticas, así que
+la app necesita un bot funcionando (en Termux, tu PC o un servidor): pulsa **⚙ Servidor** y
+escribe su dirección. También vale `…/app/?servidor=http://localhost:8000`.
+
+La web se publica sola con `.github/workflows/pages.yml` a partir de `pagina/` y `web/`.
+Para activarla la primera vez: en GitHub, **Settings → Pages → Source: GitHub Actions**.
+
+Por seguridad, el bot solo acepta peticiones de otras webs si vienen de `*.github.io` o de
+`localhost` (se cambia con `BOT_ORIGENES`, por ejemplo `BOT_ORIGENES=https://mi-dominio.com`).
+
 ## 📱 Usarlo desde el móvil
 
 ### Opción A: en el propio móvil Android con Termux (recomendada)

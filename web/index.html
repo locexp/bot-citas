@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f7a4d">
-<link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/static/icono.svg">
-<link rel="apple-touch-icon" href="/static/icono.svg">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icono.svg">
+<link rel="apple-touch-icon" href="icono.svg">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>SuperBot</title>
 <style>
@@ -70,13 +70,29 @@
   .miniaturas { display: flex; gap: 6px; margin-top: 8px; overflow-x: auto; }
   .miniaturas img { width: 44px; height: 44px; object-fit: contain; background: #fff; border-radius: 6px; border: 1px solid var(--borde); flex: none; }
   .enlace { font-size: .8rem; color: var(--suave); word-break: break-all; }
+  .enlace-boton { margin-left: auto; font: inherit; font-size: .85rem; font-weight: 600; color: var(--acento); background: none; border: 1px solid var(--borde); border-radius: 999px; padding: 6px 12px; }
+  input[type=url] { width: 100%; font: inherit; color: inherit; background: var(--fondo); border: 1px solid var(--borde); border-radius: 10px; padding: 12px; }
+  .ok { color: var(--acento); font-weight: 600; font-size: .9rem; margin-top: 8px; }
+  .mal { color: var(--error); font-weight: 600; font-size: .9rem; margin-top: 8px; }
+  .secundario { margin-top: 10px; width: 100%; padding: 12px; font: inherit; font-weight: 700; border-radius: 12px; border: 1px solid var(--acento); background: transparent; color: var(--acento); }
   @media (max-width: 380px) { .producto { grid-template-columns: 72px 1fr; } .producto img.principal-img { width: 72px; height: 72px; } }
 </style>
 </head>
 <body>
 <main>
-  <h1><img src="/static/icono.svg" alt="">SuperBot</h1>
+  <h1><img src="icono.svg" alt="">SuperBot <button type="button" id="abrir-servidor" class="enlace-boton" aria-label="Configurar servidor">⚙ Servidor</button></h1>
   <p class="sub">Descarga título, descripción, precio e imágenes de productos de supermercado.</p>
+
+  <section class="tarjeta" id="caja-servidor" hidden>
+    <label for="servidor">Dirección de tu servidor SuperBot</label>
+    <input type="url" id="servidor" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
+      placeholder="https://mi-superbot.onrender.com">
+    <div class="ayuda">Esta página solo es la interfaz: el bot tiene que estar funcionando en tu PC, en tu móvil
+      (Termux: <code>http://localhost:8000</code>) o en un servidor. Mira las instrucciones en la
+      <a href="https://locexp.github.io/bot-citas/" target="_blank" rel="noopener">página del proyecto</a>.</div>
+    <button type="button" class="secundario" id="guardar-servidor">Conectar</button>
+    <div id="estado-servidor"></div>
+  </section>
 
   <form class="tarjeta" id="formulario">
     <div class="modo" role="tablist">
@@ -124,13 +140,67 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
-let modo = "producto", clave = "";
-try { clave = localStorage.getItem("superbot-clave") || ""; } catch (e) {}
+let modo = "producto", clave = "", API = "";
+const leer = (k) => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } };
+const escribir = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+clave = leer("superbot-clave");
 
-fetch("/api/estado").then(r => r.json()).then(e => {
-  if (e.clave) { $("#caja-clave").hidden = false; $("#clave").value = clave; }
+// Servidor: "" si esta página la sirve el propio bot; si no (GitHub Pages), el que configure el usuario.
+const param = new URLSearchParams(location.search).get("servidor");
+if (param) escribir("superbot-servidor", param);
+const normalizar = (u) => u.trim().replace(/\/+$/, "");
+
+async function conectar(base) {
+  const r = await fetch(`${base}/api/estado`, { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const e = await r.json();
+  if (typeof e.max_productos !== "number") throw new Error("no es un servidor SuperBot");
+  API = base;
+  $("#caja-clave").hidden = !e.clave;
+  if (e.clave) $("#clave").value = clave;
   $("#max").max = e.max_productos;
-});
+  $("#boton").disabled = false;
+  return e;
+}
+
+function pedirServidor(msg, error) {
+  $("#caja-servidor").hidden = false;
+  $("#servidor").value = leer("superbot-servidor");
+  $("#estado-servidor").className = error ? "mal" : "ok";
+  $("#estado-servidor").textContent = msg || "";
+}
+
+(async () => {
+  try { await conectar(""); return; } catch (e) {}  // servida por el propio bot
+  const guardado = leer("superbot-servidor");
+  $("#boton").disabled = true;
+  if (!guardado) return pedirServidor("Configura la dirección de tu servidor para empezar.", false);
+  try { await conectar(normalizar(guardado)); $("#caja-servidor").hidden = true; }
+  catch (e) { pedirServidor(`No se pudo conectar con ${guardado}. ¿Está el bot en marcha?`, true); }
+})();
+
+$("#abrir-servidor").onclick = () => {
+  const visible = !$("#caja-servidor").hidden;
+  if (visible) $("#caja-servidor").hidden = true;
+  else pedirServidor(API ? `Conectado a ${API}` : (leer("superbot-servidor") ? "" : "Sin configurar"), false);
+};
+
+$("#guardar-servidor").onclick = async () => {
+  const base = normalizar($("#servidor").value);
+  if (!/^https?:\/\//.test(base)) return pedirServidor("Escribe una dirección que empiece por http:// o https://", true);
+  $("#estado-servidor").className = ""; $("#estado-servidor").textContent = "Conectando…";
+  try {
+    await conectar(base);
+    escribir("superbot-servidor", base);
+    $("#estado-servidor").className = "ok"; $("#estado-servidor").textContent = "✔ Conectado";
+    setTimeout(() => { $("#caja-servidor").hidden = true; }, 900);
+  } catch (e) {
+    const mixto = location.protocol === "https:" && base.startsWith("http:") && !/\/\/(localhost|127\.0\.0\.1)/.test(base);
+    pedirServidor(mixto
+      ? "Desde una página https solo se puede conectar con servidores https (o con localhost)."
+      : `No se pudo conectar (${e.message}). Comprueba la dirección y que el bot esté en marcha.`, true);
+  }
+};
 
 document.querySelectorAll(".modo button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".modo button").forEach(x => x.classList.toggle("activo", x === b));
@@ -150,7 +220,7 @@ const esc = (t) => String(t ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&
 $("#formulario").onsubmit = async (ev) => {
   ev.preventDefault();
   clave = $("#clave").value;
-  try { localStorage.setItem("superbot-clave", clave); } catch (e) {}
+  escribir("superbot-clave", clave);
   $("#boton").disabled = true;
   $("#resultados").innerHTML = "";
   $("#descargas").style.display = "none";
@@ -161,7 +231,7 @@ $("#formulario").onsubmit = async (ev) => {
   $("#log").textContent = "";
   $("#progreso").scrollIntoView({ behavior: "smooth", block: "start" });
   try {
-    const r = await fetch("/api/trabajos", { method: "POST", headers: cabeceras(), body: JSON.stringify({
+    const r = await fetch(`${API}/api/trabajos`, { method: "POST", headers: cabeceras(), body: JSON.stringify({
       urls: $("#urls").value, modo, max: +$("#max").value, max_imagenes: +$("#max_imagenes").value,
       imagenes: $("#imagenes").checked, navegador: $("#navegador").checked,
     })});
@@ -173,7 +243,7 @@ $("#formulario").onsubmit = async (ev) => {
 
 async function seguir(id) {
   let j;
-  try { j = await (await fetch(`/api/trabajos/${id}`, { headers: cabeceras() })).json(); }
+  try { j = await (await fetch(`${API}/api/trabajos/${id}`, { headers: cabeceras() })).json(); }
   catch (e) { return setTimeout(() => seguir(id), 2000); }
   $("#log").textContent = j.log.join("\n");
   $("#log").scrollTop = 1e9;
@@ -184,12 +254,12 @@ async function seguir(id) {
   mostrarErrores(j.errores);
   if (n) {
     $("#descargas").style.display = "flex";
-    $("#dl-zip").href = conClave(`/api/trabajos/${id}/zip`);
-    $("#dl-csv").href = conClave(`/api/trabajos/${id}/productos.csv`);
-    $("#dl-json").href = conClave(`/api/trabajos/${id}/productos.json`);
+    $("#dl-zip").href = conClave(`${API}/api/trabajos/${id}/zip`);
+    $("#dl-csv").href = conClave(`${API}/api/trabajos/${id}/productos.csv`);
+    $("#dl-json").href = conClave(`${API}/api/trabajos/${id}/productos.json`);
   }
   $("#resultados").innerHTML = j.productos.map(p => {
-    const imgs = (p.imagenes_locales.length ? p.imagenes_locales.map(r => conClave(`/api/trabajos/${id}/imagen/${r}`)) : p.imagenes);
+    const imgs = (p.imagenes_locales.length ? p.imagenes_locales.map(r => conClave(`${API}/api/trabajos/${id}/imagen/${r}`)) : p.imagenes);
     const precio = p.precio != null ? `${p.precio.toFixed(2).replace(".", ",")} ${p.moneda === "EUR" ? "€" : (p.moneda || "")}` : "Precio no encontrado";
     return `<article class="tarjeta producto">
       ${imgs[0] ? `<img class="principal-img" src="${esc(imgs[0])}" alt="" loading="lazy">` : `<div></div>`}
