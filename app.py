@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import socket
@@ -18,6 +19,8 @@ from urllib.parse import urlparse
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
+from facturas import campos as campos_factura
+from facturas.lector import ErrorFactura, leer_factura
 from scraper.descargador import Descargador
 from scraper.servicio import comprimir, guardar, scrapear, url_publica
 
@@ -28,6 +31,7 @@ MAX_PRODUCTOS = int(os.environ.get("BOT_MAX_PRODUCTOS", "40"))
 CADUCIDAD = 6 * 3600  # se borran los trabajos de más de 6 h
 
 app = Flask(__name__, static_folder=str(BASE / "web"), static_url_path="/static")
+app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # fotos/PDF de facturas
 trabajos: dict[str, dict] = {}
 cerrojo = threading.Lock()
 
@@ -74,7 +78,8 @@ def manifest():
 
 @app.get("/api/estado")
 def estado():
-    return jsonify(clave=bool(CLAVE), max_productos=MAX_PRODUCTOS)
+    return jsonify(clave=bool(CLAVE), max_productos=MAX_PRODUCTOS,
+                   facturas=bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")))
 
 
 @app.post("/api/trabajos")
@@ -143,6 +148,34 @@ def descargar_fichero(tid, fichero):
     return send_from_directory(j["carpeta"], fichero, as_attachment=True)
 
 
+# --- Lector de facturas ---------------------------------------------------------------
+
+@app.get("/facturas")
+def facturas_inicio():
+    return send_from_directory(BASE / "web", "facturas.html")
+
+
+@app.get("/api/facturas/campos")
+def facturas_campos():
+    return jsonify(campos_factura.catalogo())
+
+
+@app.post("/api/facturas/leer")
+def facturas_leer():
+    comprobar_clave()
+    ficheros = [(f.filename or "", f.read()) for f in request.files.getlist("ficheros")]
+    ficheros = [(n, d) for n, d in ficheros if d]
+    if len(ficheros) > 10:
+        return jsonify(error="Máximo 10 páginas por factura"), 400
+    try:
+        seleccion = json.loads(request.form.get("campos") or "{}")
+        return jsonify(leer_factura(ficheros, seleccion))
+    except ErrorFactura as e:
+        return jsonify(error=str(e)), 400
+    except json.JSONDecodeError:
+        return jsonify(error="Selección de campos no válida"), 400
+
+
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", "8000"))
     try:
@@ -150,5 +183,6 @@ if __name__ == "__main__":
     except OSError:
         ip = "TU-IP"
     print(f"\n  Abre en este dispositivo:  http://localhost:{puerto}")
-    print(f"  Desde otro móvil en tu wifi: http://{ip}:{puerto}\n")
+    print(f"  Desde otro móvil en tu wifi: http://{ip}:{puerto}")
+    print(f"  Lector de facturas:          http://localhost:{puerto}/facturas\n")
     app.run(host="0.0.0.0", port=puerto, threaded=True)

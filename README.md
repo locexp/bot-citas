@@ -48,6 +48,29 @@ servidores con Cloudflare, así que las opciones A y B suelen funcionar mejor.
 | `BOT_MAX_PRODUCTOS` | Límite de productos por búsqueda (40) |
 | `BOT_DATOS` | Carpeta donde se guardan las descargas (se borran a las 6 h) |
 
+## 🧾 Lector de facturas
+En la misma app, abre **http://localhost:8000/facturas** (o pulsa «Lector de facturas» en la
+portada). Puedes añadirla también a la pantalla de inicio del móvil.
+
+1. **Elige qué datos quieres copiar**: nº de factura, fecha, emisor, NIF/CIF, base imponible,
+   % IVA, cuota de IVA, recargo, IRPF, total, forma de pago, IBAN... y, por cada producto,
+   descripción, cantidad, precio, precio con IVA, % IVA, importe... La elección se recuerda.
+2. **Haz una foto** con la cámara o elige fotos/PDF (si la factura tiene varias páginas,
+   añádelas todas) y pulsa **Leer factura**.
+3. Revisa los datos (se pueden corregir a mano). La app avisa si un **NIF/CIF no es válido**,
+   si **base + IVA no cuadra con el total** o si la foto se lee mal.
+4. Ve leyendo más facturas: se acumulan. Al final, **Copiar (para Excel)**, **CSV** (con `;`
+   y coma decimal, se abre directamente en Excel en español) o **JSON**.
+
+La lectura la hace la IA de Claude, así que necesitas una **clave de API**:
+1. Créala en https://console.anthropic.com → *API Keys* (es de pago por uso; cada factura
+   cuesta unos céntimos).
+2. Ponla en `.env` como `ANTHROPIC_API_KEY=...` (ver `.env.ejemplo`) y arranca con `./iniciar.sh`.
+
+Las fotos solo se envían a la API de Claude para leerlas; la app no las guarda. Los datos
+leídos se quedan en el navegador del móvil hasta que pulses «Borrar todo».
+Opcional: `FACTURAS_MODELO` para cambiar el modelo (por defecto `claude-opus-5-5`).
+
 ## ✈️ Usarlo desde Telegram
 Le mandas un enlace al bot y te contesta con la foto, el precio y la descripción de cada
 producto, y al final un ZIP con imágenes, CSV y JSON. Funciona en cualquier móvil.
