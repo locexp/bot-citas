@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 
 from .descargador import Descargador, slug
 from .extractor import extraer_enlaces_productos, extraer_producto
-from .rastreador import descubrir_productos
+from .rastreador import descubrir_productos, productos_de_categoria
 
 
 def cargar_selectores(ruta: str | None, url: str) -> dict | None:
@@ -55,7 +55,7 @@ def scrapear(urls: list[str], categorias: list[str], salida: Path, *, max_por_ca
                 break
             log(f"Categoría: {cat}")
             try:
-                enlaces = extraer_enlaces_productos(d.html(cat), cat, patron)[:max_por_categoria]
+                enlaces = productos_de_categoria(d, cat, max_por_categoria, log, parar, patron)
             except Exception as e:
                 errores.append(f"{cat}: {e}")
                 log(f" ! {e}")

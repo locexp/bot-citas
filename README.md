@@ -108,7 +108,7 @@ producto, y al final un ZIP con imágenes, CSV y JSON. Funciona en cualquier mó
 | `/web <enlace> [cantidad] [filtro]` | **Escanea la web entera** y descarga sus productos (200 por defecto; `todos` = hasta 5000). Ej.: `/web https://www.ahorramas.com todos leche` |
 | `/parar` | Detiene el escaneo y envía lo descargado hasta ese momento |
 | un enlace (o varios) | Descarga esos productos |
-| `/categoria <enlace> [máx]` | Todos los productos de una categoría, oferta o búsqueda (20 por defecto) |
+| `/categoria <enlace> [cantidad\|todos]` | **Todos** los productos de una categoría, oferta o búsqueda: recorre sus páginas y subcategorías (200 por defecto) |
 | `/opciones` | Ver opciones · `/opciones imagenes no` · `/opciones navegador si` · `/opciones max_imagenes 3` |
 | `/yo` | Tu id de usuario |
 | `/ayuda` | Ayuda |
@@ -150,6 +150,21 @@ Si el servidor se reinicia (por ejemplo, al desplegar una versión nueva), el es
 curso se pierde.
 
 Variables: `BOT_MAX_ESCANEO` (máximo por escaneo, 5000), `BOT_LIMITE_ESCANEO` (segundos, 8 h).
+
+## Descargar categorías completas
+Las webs no enseñan una categoría entera de golpe: la muestran por páginas, con «cargar más»
+al bajar o repartida en subcategorías. El bot, a partir del enlace de la categoría:
+1. pide muchos productos por página si la web lo admite (Ahorramas: `?start=0&sz=…`);
+2. sigue la paginación («siguiente», `?page=2`…);
+3. entra en las subcategorías (Alcampo);
+4. lee los productos que vienen dentro de los datos de la página (Lidl);
+5. para cuando tiene los productos que la categoría dice tener, o el máximo que pidas.
+
+| Prueba (nov. 2026) | Encontrados |
+|---|---|
+| Ahorramas · Bebidas de Navidad | 338 de 338 |
+| Alcampo · Jamones y paletas | 95 de 110 (el resto parecen agotados) |
+| Lidl · Frutas y verduras | 15 de 22 (el resto se carga con JavaScript) |
 
 ## Cómo detecta los datos
 1. Selectores CSS propios (`selectores.json`, si existe)

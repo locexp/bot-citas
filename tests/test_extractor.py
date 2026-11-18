@@ -189,3 +189,11 @@ def test_rastreador_sitemaps(monkeypatch):
     assert "https://s.es/sitemap-categories.xml" not in leidos
     assert rastreador.descubrir_productos(D(), "https://s.es/", 10, filtro="Léche", log=lambda m: None) == \
         ["https://s.es/leche-entera-1l-1.html"]
+
+
+def test_no_descarta_productos_que_empiezan_por_c():
+    from scraper.extractor import NO_PRODUCTO
+    for ruta in ("/p/champinon-laminado/p11029644", "/products/cebo-iberico/123", "/cafe-molido-12345.html"):
+        assert not NO_PRODUCTO.search(ruta), ruta
+    for ruta in ("/c/frescos/s100", "/categories/frescos/OC1", "/folletos.html", "/contacto"):
+        assert NO_PRODUCTO.search(ruta), ruta

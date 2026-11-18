@@ -131,7 +131,8 @@ def icono():
 
 @app.get("/api/estado")
 def estado():
-    return jsonify(clave=bool(CLAVE), max_productos=MAX_PRODUCTOS, max_escaneo=MAX_ESCANEO)
+    return jsonify(clave=bool(CLAVE), max_productos=MAX_PRODUCTOS, max_escaneo=MAX_ESCANEO,
+                   max_categoria=MAX_ESCANEO)
 
 
 @app.post("/api/trabajos")
@@ -149,7 +150,7 @@ def crear():
     if malas:
         return jsonify(error=f"URL no válida: {malas[0]}"), 400
 
-    tope = MAX_ESCANEO if modo == "web" else MAX_PRODUCTOS
+    tope = MAX_ESCANEO if modo in ("web", "categoria") else MAX_PRODUCTOS
     opciones = {
         "max": max(1, min(int(datos.get("max") or 20), tope)),
         "imagenes": bool(datos.get("imagenes", True)),

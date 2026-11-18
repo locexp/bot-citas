@@ -38,6 +38,7 @@ LIMITE_TRABAJO = int(os.environ.get("BOT_LIMITE_TRABAJO", "240"))  # segundos
 LIMITE_ESCANEO = int(os.environ.get("BOT_LIMITE_ESCANEO", str(8 * 3600)))  # segundos
 MAX_ESCANEO = int(os.environ.get("BOT_MAX_ESCANEO", "5000"))
 ESCANEO_POR_DEFECTO = 200
+CATEGORIA_POR_DEFECTO = 200
 FICHAS_MAXIMAS = 10  # con más productos se envía un resumen y las tablas
 URL_RE = re.compile(r"https?://[^\s<>\"']+")
 
@@ -52,7 +53,8 @@ AYUDA = (
     "`/parar` detiene el escaneo y te envía lo descargado hasta ese momento.\n\n"
     "*Otras formas*\n"
     "• Pega uno o varios *enlaces de producto* y te envío cada ficha.\n"
-    "• `/categoria <enlace> [máx]`: los productos de una categoría, oferta o búsqueda.\n"
+    "• `/categoria <enlace> [cantidad|todos]`: *todos* los productos de una categoría, oferta o "
+    "búsqueda (recorre sus páginas y subcategorías; 200 por defecto).\n"
     "• `/opciones`: imágenes, modo navegador…\n"
     "• `/yo`: tu id de usuario.\n\n"
     "Te envío los resultados en CSV (Excel) y JSON, y las imágenes en ZIP."
@@ -264,10 +266,16 @@ class Bot:
             extra = {"sitios": urls[:1], "max_escaneo": maximo, "filtro": " ".join(palabras) or None}
             args = ([], [], maximo)
             limite = LIMITE_ESCANEO
-        elif comando == "/categoria":
-            m = re.search(r"\s(\d+)\s*$", texto)
-            maximo = min(int(m.group(1)), MAX_PRODUCTOS) if m else 20
-            args = ([], urls[:1], maximo)
+        elif comando in ("/categoria", "/cat"):
+            resto = URL_RE.sub(" ", texto).split()[1:]
+            maximo = CATEGORIA_POR_DEFECTO
+            for t in resto:
+                if t.isdigit():
+                    maximo = int(t)
+                elif t.lower() in ("todo", "todos", "all"):
+                    maximo = MAX_ESCANEO
+            args = ([], urls[:1], max(1, min(maximo, MAX_ESCANEO)))
+            limite = LIMITE_ESCANEO
         else:
             args = (urls[:MAX_PRODUCTOS], [], MAX_PRODUCTOS)
         self._siguiente_id += 1
@@ -332,7 +340,7 @@ class Bot:
                     if h > 3:
                         quedan = (time.time() - estado["inicio_descarga"]) / (h - 1) * (t - h)
                         cabecera += f" · quedan ~{_duracion(quedan)}"
-                    if escaneo:
+                    if escaneo or categorias:
                         cabecera += "\n(/parar para detener y recibir lo descargado)"
                 del lineas[:-6]
                 self.tg.editar(chat, progreso["message_id"], cabecera + "\n\n" + "\n".join(l[:120] for l in lineas))

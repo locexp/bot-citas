@@ -152,7 +152,7 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
-let modo = "producto", clave = "", API = "", limites = { categoria: 40, web: 5000 }, trabajoActual = null;
+let modo = "producto", clave = "", API = "", limites = { categoria: 5000, web: 5000 }, trabajoActual = null;
 let imagenesAntes = true;
 const leer = (k) => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } };
 const escribir = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
@@ -171,7 +171,7 @@ async function conectar(base) {
   API = base;
   $("#caja-clave").hidden = !e.clave;
   if (e.clave) $("#clave").value = clave;
-  limites = { categoria: e.max_productos, web: e.max_escaneo || 5000 };
+  limites = { categoria: e.max_categoria || e.max_productos, web: e.max_escaneo || 5000 };
   $("#max").max = limites[modo] || e.max_productos;
   $("#boton").disabled = false;
   return e;
@@ -222,7 +222,7 @@ document.querySelectorAll(".modo button").forEach(b => b.onclick = () => {
   modo = b.dataset.modo;
   const textos = {
     producto: ["Enlaces de producto (uno por línea)", "Consejo: en la app o web del súper, pulsa «Compartir → Copiar enlace» y pégalo aquí.", "https://www.ahorramas.com/..."],
-    categoria: ["Enlace de la categoría, oferta o búsqueda", "Se descargarán los productos que aparezcan en esa página.", "https://www.compraonline.alcampo.es/categories/..."],
+    categoria: ["Enlace de la categoría, oferta o búsqueda", "Se descargan todos sus productos: recorre sus páginas y subcategorías hasta el máximo que elijas.", "https://www.ahorramas.com/frescos/..."],
     web: ["Dirección de la web del supermercado", "Se buscan todos sus productos (en su sitemap o recorriendo las categorías). Con miles de productos puede tardar horas: elige la cantidad.", "https://www.ahorramas.com"],
   }[modo];
   $("#etiqueta-urls").textContent = textos[0];
@@ -232,9 +232,10 @@ document.querySelectorAll(".modo button").forEach(b => b.onclick = () => {
   $("#caja-filtro").hidden = modo !== "web";
   if (modo !== "producto") {
     $("#max").max = limites[modo];
-    $("#max").value = modo === "web" ? 200 : Math.min(+$("#max").value || 20, limites.categoria);
+    $("#max").value = 200;
   }
   // En webs enteras, por defecto sin descargar imágenes (con miles de productos ocupan mucho)
+  $("#boton").textContent = modo === "producto" ? "Descargar productos" : "Buscar y descargar";
   if (modo === "web" && anterior !== "web") { imagenesAntes = $("#imagenes").checked; $("#imagenes").checked = false; }
   if (modo !== "web" && anterior === "web") $("#imagenes").checked = imagenesAntes;
 });

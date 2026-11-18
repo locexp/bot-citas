@@ -9,6 +9,7 @@ Estrategias, en orden de prioridad:
 """
 from __future__ import annotations
 
+import html as html_mod
 import json
 import re
 from dataclasses import dataclass, field, asdict
@@ -295,8 +296,12 @@ PATRON_FUERTE = re.compile(
     r"/(p|producto|productos|product|products|prod|item|articulo|articulos)/"
     r"|-\d{4,}(\.html?)?/?$|/\d{5,}/?$|/p\d{5,}|-p\d+", re.I)
 PATRON_DEBIL = re.compile(r"\.html?$", re.I)
-NO_PRODUCTO = re.compile(r"/(c|categor|categories|content|ayuda|help|login|user|cuenta|account|"
-                         r"folleto|tiendas|contact|legal|cookies|blog)", re.I)
+JSON_ENLACE_RE = re.compile(
+    r'"(?:canonicalUrl|productUrl|pdpUrl|url|href|link|seoUrl)"\s*:\s*"(/[^"\s]{3,300}|https?://[^"\s]{3,300})"', re.I)
+# Secciones que no son productos. Cada palabra debe ser un tramo completo de la ruta
+# («/c/...» sí, «/champinon» no).
+NO_PRODUCTO = re.compile(r"/(c|categor\w*|content|ayuda|help|login|user|cuenta|account|"
+                         r"folletos?|tiendas|contact\w*|legal|cookies|blog)(?=/|$|\.html?$)", re.I)
 
 
 def extraer_enlaces_productos(html: str, url: str, patron: str | None = None) -> list[str]:
@@ -315,6 +320,15 @@ def extraer_enlaces_productos(html: str, url: str, patron: str | None = None) ->
                     seguros.append(urljoin(url, u))
     for a in soup.select("a.product-item-link[href], a.product-item-photo[href], a.product-link[href]"):
         seguros.append(urljoin(url, a["href"]))
+    # Enlaces dentro de datos JSON de la página (webs que pintan los productos con JavaScript,
+    # p. ej. Lidl: "canonicalUrl":"/p/aguacate/p111"), también escapados en atributos HTML.
+    crudo = html_mod.unescape(html).replace("\\/", "/")
+    for m in JSON_ENLACE_RE.finditer(crudo):
+        href = urljoin(url, m.group(1)).split("#")[0]
+        ruta = urlparse(href).path
+        if (urlparse(href).netloc == dominio and PATRON_FUERTE.search(ruta)
+                and not NO_PRODUCTO.search(ruta) and (not patron or re.search(patron, href, re.I))):
+            seguros.append(href)
     regex = re.compile(patron, re.I) if patron else None
     for a in soup.find_all("a", href=True):
         href = urljoin(url, a["href"]).split("#")[0]

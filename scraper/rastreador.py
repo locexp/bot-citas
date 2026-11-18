@@ -167,3 +167,148 @@ def descubrir_productos(d: Descargador, inicio: str, maximo: int = 300, filtro: 
     productos = recorriendo(d, inicio, maximo, filtro, log, parar, patron=patron)
     log(f"→ {len(productos)} productos encontrados recorriendo la web")
     return productos
+
+
+# ---------------------------------------------------------------------------
+# Categorías completas
+# ---------------------------------------------------------------------------
+PARAM_PAGINA = re.compile(r"[?&](page|p|pagina|pag|pageNumber|pg|numPagina)=(\d+)", re.I)
+TOTAL_RE = [
+    re.compile(r'"currentCategory"\s*:\s*\{[^{}]*?"productCount"\s*:\s*(\d+)'),   # Ocado (Alcampo)
+    re.compile(r'"(?:totalCount|totalResults|numFound|total_products|productCount)"\s*:\s*(\d+)'),
+    re.compile(r"(\d[\d.]{0,7})\s*(?:resultados|productos|artículos|articulos)\b", re.I),
+]
+
+
+def total_declarado(html: str) -> int | None:
+    """Cuántos productos dice tener la categoría (si la página lo indica)."""
+    for rx in TOTAL_RE:
+        if m := rx.search(html):
+            try:
+                n = int(m.group(1).replace(".", ""))
+                if 0 < n < 200000:
+                    return n
+            except ValueError:
+                pass
+    return None
+
+
+def _con_parametros(url: str, **params) -> str:
+    from urllib.parse import parse_qsl, urlencode
+    u = urlparse(url)
+    q = dict(parse_qsl(u.query))
+    q.update({k: str(v) for k, v in params.items()})
+    return u._replace(query=urlencode(q)).geturl()
+
+
+def _prefijo_categoria(url: str) -> str:
+    """/categories/frescos/jamones/OC151001 -> /categories/frescos/jamones (quita un id final)."""
+    ruta = urlparse(url).path.rstrip("/")
+    ultimo = ruta.rsplit("/", 1)[-1]
+    if re.search(r"\d", ultimo) and ruta.count("/") > 1:
+        ruta = ruta.rsplit("/", 1)[0]
+    return ruta.lower()
+
+
+def productos_de_categoria(d: Descargador, url: str, maximo: int = 200,
+                           log: Callable[[str], None] = print, parar: threading.Event | None = None,
+                           patron: str | None = None, max_paginas: int = 60) -> list[str]:
+    """Todos los productos de una categoría, aunque la web los muestre por páginas,
+    con «cargar más» o repartidos en subcategorías."""
+    productos: list[str] = []
+    paginas = 0
+
+    def añadir(html, pagina_url) -> int:
+        nonlocal productos
+        antes = len(productos)
+        productos = list(dict.fromkeys(productos + extraer_enlaces_productos(html, pagina_url, patron)))
+        return len(productos) - antes
+
+    def basta() -> bool:
+        return len(productos) >= maximo or bool(parar and parar.is_set())
+
+    html = d.html(url)
+    paginas += 1
+    añadir(html, url)
+    total = total_declarado(html)
+    log(f" · página 1: {len(productos)} productos" + (f" (la categoría dice tener {total})" if total else ""))
+
+    def completo() -> bool:
+        return basta() or bool(total and len(productos) >= total)
+
+    # 1) Webs que admiten pedir muchos productos de una vez (Salesforce: ?start=0&sz=N, p. ej. Ahorramas)
+    if not completo() and re.search(r"[?&;]sz=\d+|Search-UpdateGrid|Search-ShowAjax", html):
+        inicio = 0
+        lote = min(max(maximo, 50), 500)
+        while not completo() and paginas < max_paginas:
+            pagina = _con_parametros(url, start=inicio, sz=lote)
+            nuevos = añadir(d.html(pagina), pagina)
+            paginas += 1
+            log(f" · productos {inicio + 1}-{inicio + lote}: {nuevos} nuevos (total {len(productos)})")
+            if not nuevos:
+                break
+            inicio += lote
+
+    # 2) Paginación clásica (?page=2, «siguiente»)
+    if not completo():
+        soup = BeautifulSoup(html, "lxml")
+        siguiente = soup.select_one('link[rel=next][href], a[rel=next][href]')
+        numeradas = [m for a in soup.find_all("a", href=True) if (m := PARAM_PAGINA.search(a["href"]))]
+        if siguiente or numeradas:
+            nombre = numeradas[0].group(1) if numeradas else None
+            n = 2
+            pagina = urljoin(url, siguiente["href"]) if siguiente else _con_parametros(url, **{nombre: n})
+            while pagina and not completo() and paginas < max_paginas:
+                h = d.html(pagina)
+                paginas += 1
+                nuevos = añadir(h, pagina)
+                log(f" · página {n}: {nuevos} nuevos (total {len(productos)})")
+                if not nuevos:
+                    break
+                n += 1
+                sig = BeautifulSoup(h, "lxml").select_one('link[rel=next][href], a[rel=next][href]')
+                pagina = urljoin(pagina, sig["href"]) if sig else (_con_parametros(url, **{nombre: n}) if nombre else None)
+
+    # 3) Subcategorías: la web solo enseña una parte; cada subcategoría es más pequeña (p. ej. Alcampo)
+    if not completo():
+        from urllib.parse import unquote
+
+        def normal(u: str) -> str:
+            return unquote(unquote(u.split("#")[0].split("?")[0])).rstrip("/")
+
+        prefijo = unquote(unquote(_prefijo_categoria(url)))
+        cola, vistas = deque(), {normal(url).lower()}
+
+        def encolar(h, desde):
+            for a in BeautifulSoup(h, "lxml").find_all("a", href=True):
+                sub = normal(urljoin(desde, a["href"]))  # sin ?orden=… (a menudo prohibido en robots.txt)
+                ruta = urlparse(sub).path.lower()
+                if (sub.lower() not in vistas and _mismo_sitio(sub, url)
+                        and ruta.startswith(prefijo + "/") and ruta != prefijo
+                        and not (PATRON_FUERTE.search(ruta) and not NO_PRODUCTO.search(ruta))):
+                    vistas.add(sub.lower())
+                    cola.append(sub)
+
+        encolar(html, url)
+        if cola:
+            log(f" · {len(cola)} subcategorías para completar")
+        while cola and not completo() and paginas < max_paginas:
+            sub = cola.popleft()
+            try:
+                h = d.html(sub)
+            except BloqueoAntiBot:
+                raise
+            except Exception as e:  # noqa: BLE001
+                log(f"   ! {sub}: {e}")
+                continue
+            paginas += 1
+            nuevos = añadir(h, sub)
+            nombre = urlparse(sub).path.rstrip("/").rsplit("/", 2)
+            nombre = nombre[-2] if re.search(r"\d", nombre[-1]) and len(nombre) > 2 else nombre[-1]
+            log(f" · {nombre[:40]}: {nuevos} nuevos (total {len(productos)})")
+            encolar(h, sub)
+
+    if total and len(productos) < total and not basta():
+        log(f" · Encontrados {len(productos)} de los {total} que indica la web (el resto pueden ser productos "
+            "agotados o que la web solo carga con JavaScript; prueba el «modo navegador»)")
+    return productos[:maximo]
