@@ -197,3 +197,21 @@ def test_no_descarta_productos_que_empiezan_por_c():
         assert not NO_PRODUCTO.search(ruta), ruta
     for ruta in ("/c/frescos/s100", "/categories/frescos/OC1", "/folletos.html", "/contacto"):
         assert NO_PRODUCTO.search(ruta), ruta
+
+
+def test_arbol_categorias():
+    from scraper.categorias import ArbolCategorias, limpiar_nombre
+    a = ArbolCategorias("https://s.es/")
+    a.añadir("https://s.es/categories/frescos/OC15", "Frescos")
+    a.añadir("https://s.es/categories/frescos/carne/OC1501", "Carne")
+    a.añadir("https://s.es/categories/frescos/carne/pollo/OC150101", None)
+    a.añadir("https://s.es/alimentacion/aceites/", "Aceites")  # padre sin página propia
+    a.ordenar()
+    raices = {n.nombre: n for n in a.raices()}
+    assert set(raices) == {"Frescos", "Alimentacion"}
+    carne = a.nodos[raices["Frescos"].hijos[0]]
+    assert carne.nombre == "Carne" and a.nodos[carne.hijos[0]].nombre == "Pollo"
+    assert a.ruta(carne.hijos[0]) == "Frescos › Carne › Pollo"
+    assert a.urls_de(raices["Alimentacion"].id) == ["https://s.es/alimentacion/aceites/"]
+    assert [n.nombre for n in a.buscar("POLLO")] == ["Pollo"]
+    assert limpiar_nombre("Bebé­ Bebé") == "Bebé"

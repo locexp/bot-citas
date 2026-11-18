@@ -31,6 +31,7 @@ import lxml.etree  # noqa: E402,F401
 
 from scraper import extractor  # noqa: E402,F401
 from scraper.descargador import Descargador
+from scraper.categorias import SUPERMERCADOS, categorias_de
 from scraper.servicio import comprimir_a_fichero, guardar, scrapear, url_publica
 
 BASE = Path(__file__).parent
@@ -173,6 +174,50 @@ def crear():
     threading.Thread(target=ejecutar, daemon=True, args=(tid, urls, categorias, opciones),
                      name=f"trabajo-web-{tid}").start()
     return jsonify(id=tid)
+
+
+@app.get("/api/supermercados")
+def supermercados():
+    return jsonify(SUPERMERCADOS)
+
+
+@app.get("/api/categorias")
+def categorias():
+    """Categorías de una web, por niveles para no cargar miles de golpe en el móvil.
+    ?web=URL                -> categorías principales
+    ?web=URL&padre=ID       -> subcategorías de ID
+    ?web=URL&q=texto        -> búsqueda por nombre
+    Cada nodo: {id, n(ombre), u(rl), p(adre), h(nº de subcategorías), r(uta)}"""
+    comprobar_clave()
+    web = (request.args.get("web") or "").strip()
+    if not web.startswith("http"):
+        web = "https://" + web
+    if not url_publica(web):
+        return jsonify(error=f"Dirección no válida: {web}"), 400
+    try:
+        arbol = categorias_de(web)
+    except Exception as e:  # noqa: BLE001
+        return jsonify(error=str(e)), 502
+    if not arbol.nodos:
+        return jsonify(error="No he encontrado categorías en esa web. Puedes pegar el enlace "
+                             "de una categoría a mano."), 404
+    q = (request.args.get("q") or "").strip()
+    padre = request.args.get("padre")
+    if q:
+        nodos = arbol.buscar(q)
+    else:
+        try:
+            nodos = arbol.hijos_de(int(padre) if padre not in (None, "") else None)
+        except (ValueError, IndexError):
+            abort(404)
+    salida = []
+    for n in nodos:
+        d = n.a_dict()
+        d["r"] = arbol.ruta(n.id)
+        if not n.url:
+            d["us"] = arbol.urls_de(n.id)  # sin página propia: sus subcategorías
+        salida.append(d)
+    return jsonify(web=web, total=len(arbol.nodos), nodos=salida)
 
 
 @app.post("/api/trabajos/<tid>/parar")

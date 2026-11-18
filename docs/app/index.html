@@ -45,6 +45,24 @@
   .barra.fija div { animation: none; margin-left: 0; transition: width .4s; }
   #boton-parar { display: none; margin-top: 12px; width: 100%; padding: 11px; font: inherit; font-weight: 700; border-radius: 10px; border: 1px solid var(--error); background: transparent; color: var(--error); }
   .nota { color: var(--suave); font-size: .9rem; text-align: center; margin: 4px 0 14px; }
+  select { width: 100%; font: inherit; color: inherit; background: var(--fondo); border: 1px solid var(--borde); border-radius: 10px; padding: 12px; }
+  #selector-cat { margin-bottom: 14px; }
+  #selector-cat > * + * { margin-top: 10px; }
+  .migas { font-size: .9rem; color: var(--suave); display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .migas button { font: inherit; color: var(--acento); background: none; border: 0; padding: 2px 0; font-weight: 600; }
+  .lista-cat { border: 1px solid var(--borde); border-radius: 12px; max-height: 340px; overflow-y: auto; background: var(--fondo); }
+  .fila-cat { display: flex; align-items: stretch; border-bottom: 1px solid var(--borde); }
+  .fila-cat:last-child { border-bottom: 0; }
+  .fila-cat .entrar { flex: 1; text-align: left; font: inherit; color: inherit; background: none; border: 0; padding: 12px; min-height: 48px; }
+  .fila-cat .entrar small { display: block; color: var(--suave); font-size: .8rem; }
+  .fila-cat .entrar[disabled] { cursor: default; }
+  .fila-cat .anadir { flex: none; width: 52px; font-size: 1.4rem; font-weight: 700; color: var(--acento); background: none; border: 0; border-left: 1px solid var(--borde); }
+  .fila-cat .anadir.hecho { color: var(--acento-texto); background: var(--acento); }
+  .vacio { padding: 14px; color: var(--suave); font-size: .9rem; }
+  .elegidas { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--acento); color: var(--acento-texto); border-radius: 999px; padding: 6px 6px 6px 12px; font-size: .9rem; font-weight: 600; max-width: 100%; }
+  .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip button { border: 0; background: rgba(255,255,255,.25); color: inherit; width: 24px; height: 24px; border-radius: 50%; font-weight: 700; flex: none; }
   .modo button.activo { background: var(--tarjeta); color: var(--texto); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
   .fila { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
   .fila > div { flex: 1 1 140px; }
@@ -103,6 +121,19 @@
       <button type="button" class="activo" data-modo="producto">Productos</button>
       <button type="button" data-modo="categoria">Categoría</button>
       <button type="button" data-modo="web">Web entera</button>
+    </div>
+    <div id="selector-cat" hidden>
+      <div>
+        <label for="super">Supermercado</label>
+        <select id="super"><option value="">Elige un supermercado…</option></select>
+      </div>
+      <input type="url" id="super-otra" hidden placeholder="https://www.mi-supermercado.com" inputmode="url" autocapitalize="off">
+      <div id="navegador-cat" hidden>
+        <input type="text" id="buscar-cat" placeholder="🔍 Buscar categoría (p. ej. leche, pollo…)" autocapitalize="off">
+        <div class="migas" id="migas" style="margin-top:10px"></div>
+        <div class="lista-cat" id="lista-cat" style="margin-top:8px"></div>
+      </div>
+      <div class="elegidas" id="elegidas"></div>
     </div>
     <label for="urls" id="etiqueta-urls">Enlaces de producto (uno por línea)</label>
     <textarea id="urls" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
@@ -222,7 +253,7 @@ document.querySelectorAll(".modo button").forEach(b => b.onclick = () => {
   modo = b.dataset.modo;
   const textos = {
     producto: ["Enlaces de producto (uno por línea)", "Consejo: en la app o web del súper, pulsa «Compartir → Copiar enlace» y pégalo aquí.", "https://www.ahorramas.com/..."],
-    categoria: ["Enlace de la categoría, oferta o búsqueda", "Se descargan todos sus productos: recorre sus páginas y subcategorías hasta el máximo que elijas.", "https://www.ahorramas.com/frescos/..."],
+    categoria: ["O pega enlaces de categorías (uno por línea)", "Elige categorías arriba o pega sus enlaces. Se descargan todos sus productos (páginas y subcategorías) hasta el máximo que elijas.", "https://www.ahorramas.com/frescos/..."],
     web: ["Dirección de la web del supermercado", "Se buscan todos sus productos (en su sitemap o recorriendo las categorías). Con miles de productos puede tardar horas: elige la cantidad.", "https://www.ahorramas.com"],
   }[modo];
   $("#etiqueta-urls").textContent = textos[0];
@@ -230,6 +261,8 @@ document.querySelectorAll(".modo button").forEach(b => b.onclick = () => {
   $("#urls").placeholder = textos[2];
   $("#caja-max").hidden = modo === "producto";
   $("#caja-filtro").hidden = modo !== "web";
+  $("#selector-cat").hidden = modo !== "categoria";
+  if (modo === "categoria") cargarSupermercados();
   if (modo !== "producto") {
     $("#max").max = limites[modo];
     $("#max").value = 200;
@@ -329,6 +362,116 @@ async function seguir(id, fallos = 0) {
         <div class="enlace"><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></div>
       </div></article>`;
   }).join("");
+}
+
+
+// ---------- Selector de categorías ----------
+let superCargados = false, webCat = "", pilaCat = [], elegidas = [];
+async function api(ruta) {
+  const r = await fetch(`${API}${ruta}`, { headers: cabeceras(), cache: "no-store" });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(r.status === 401 ? "Clave incorrecta (escríbela abajo)." : (j.error || "Error " + r.status));
+  return j;
+}
+async function cargarSupermercados() {
+  if (superCargados) return;
+  try {
+    const lista = await api("/api/supermercados");
+    $("#super").innerHTML = '<option value="">Elige un supermercado…</option>' +
+      lista.map(s => `<option value="${esc(s.url)}">${esc(s.nombre)}</option>`).join("") +
+      '<option value="otra">Otra web…</option>';
+    superCargados = true;
+    const ultimo = leer("superbot-super");
+    if (ultimo && [...$("#super").options].some(o => o.value === ultimo)) { $("#super").value = ultimo; abrirWeb(ultimo); }
+  } catch (e) { /* servidor antiguo: queda solo pegar enlaces */ }
+}
+$("#super").onchange = () => {
+  const v = $("#super").value;
+  $("#super-otra").hidden = v !== "otra";
+  if (v === "otra") { $("#navegador-cat").hidden = true; return $("#super-otra").focus(); }
+  if (v) { escribir("superbot-super", v); abrirWeb(v); } else $("#navegador-cat").hidden = true;
+};
+$("#super-otra").onchange = () => { const v = $("#super-otra").value.trim(); if (v) abrirWeb(v); };
+
+function abrirWeb(web) {
+  webCat = web; pilaCat = []; $("#buscar-cat").value = "";
+  $("#navegador-cat").hidden = false;
+  mostrarNivel(null);
+}
+async function mostrarNivel(padre, nombre) {
+  if (padre === null) pilaCat = []; else if (nombre) pilaCat.push({ id: padre, n: nombre });
+  pintarMigas();
+  $("#lista-cat").innerHTML = '<div class="vacio">Cargando categorías… (la primera vez puede tardar unos segundos)</div>';
+  try {
+    const j = await api(`/api/categorias?web=${encodeURIComponent(webCat)}` + (padre === null ? "" : `&padre=${padre}`));
+    pintarLista(j.nodos, false);
+  } catch (e) { $("#lista-cat").innerHTML = `<div class="vacio">${esc(e.message)}</div>`; }
+}
+function pintarMigas() {
+  const partes = [`<button type="button" data-i="-1">Todas</button>`].concat(
+    pilaCat.map((c, i) => `› <button type="button" data-i="${i}">${esc(c.n)}</button>`));
+  $("#migas").innerHTML = partes.join(" ");
+  $("#migas").querySelectorAll("button").forEach(b => b.onclick = () => {
+    const i = +b.dataset.i;
+    if (i < 0) return mostrarNivel(null);
+    const destino = pilaCat[i]; pilaCat = pilaCat.slice(0, i);
+    mostrarNivel(destino.id, destino.n);
+  });
+}
+function pintarLista(nodos, busqueda) {
+  if (!nodos.length) { $("#lista-cat").innerHTML = '<div class="vacio">No hay categorías aquí.</div>'; return; }
+  $("#lista-cat").innerHTML = nodos.map((n, i) => {
+    const urls = n.u ? [n.u] : (n.us || []);
+    const ya = urls.length && urls.every(u => elegidas.some(e => e.urls.includes(u)));
+    const detalle = busqueda ? esc(n.r) : (n.h ? `${n.h} subcategorías ›` : "");
+    return `<div class="fila-cat">
+      <button type="button" class="entrar" data-i="${i}" ${n.h ? "" : "disabled"}>${esc(n.n)}${detalle ? `<small>${detalle}</small>` : ""}</button>
+      ${urls.length ? `<button type="button" class="anadir ${ya ? "hecho" : ""}" data-i="${i}" aria-label="Añadir ${esc(n.n)}">${ya ? "✓" : "+"}</button>` : ""}
+    </div>`;
+  }).join("");
+  $("#lista-cat").querySelectorAll(".entrar").forEach(b => b.onclick = () => {
+    const n = nodos[+b.dataset.i];
+    if (!n.h) return;
+    if (busqueda) { $("#buscar-cat").value = ""; pilaCat = []; }
+    mostrarNivel(n.id, busqueda ? n.r : n.n);
+  });
+  $("#lista-cat").querySelectorAll(".anadir").forEach(b => b.onclick = () => {
+    const n = nodos[+b.dataset.i];
+    alternarElegida({ nombre: n.r || n.n, urls: n.u ? [n.u] : n.us });
+    pintarLista(nodos, busqueda);
+  });
+  $("#lista-cat").scrollTop = 0;
+}
+let temporizadorBusqueda;
+$("#buscar-cat").oninput = () => {
+  clearTimeout(temporizadorBusqueda);
+  const q = $("#buscar-cat").value.trim();
+  temporizadorBusqueda = setTimeout(async () => {
+    if (!q) return mostrarNivel(pilaCat.length ? pilaCat.at(-1).id : null);
+    try {
+      const j = await api(`/api/categorias?web=${encodeURIComponent(webCat)}&q=${encodeURIComponent(q)}`);
+      $("#migas").innerHTML = `Resultados para «${esc(q)}»`;
+      pintarLista(j.nodos, true);
+    } catch (e) { $("#lista-cat").innerHTML = `<div class="vacio">${esc(e.message)}</div>`; }
+  }, 350);
+};
+function alternarElegida(c) {
+  const i = elegidas.findIndex(e => e.urls.join() === c.urls.join());
+  if (i >= 0) elegidas.splice(i, 1); else elegidas.push(c);
+  sincronizarElegidas();
+}
+function sincronizarElegidas() {
+  $("#elegidas").innerHTML = elegidas.map((c, i) =>
+    `<span class="chip"><span>${esc(c.nombre.split(" › ").at(-1))}</span><button type="button" data-i="${i}" aria-label="Quitar">×</button></span>`).join("");
+  $("#elegidas").querySelectorAll("button").forEach(b => b.onclick = () => {
+    elegidas.splice(+b.dataset.i, 1); sincronizarElegidas();
+    if (!$("#navegador-cat").hidden) $("#lista-cat").querySelectorAll(".anadir").forEach(x => { x.classList.remove("hecho"); x.textContent = "+"; });
+  });
+  // El cuadro de texto refleja las categorías elegidas (más las que se peguen a mano)
+  const elegidasUrls = new Set(elegidas.flatMap(c => c.urls));
+  const manuales = $("#urls").value.split("\n").map(l => l.trim()).filter(l => l && !sincronizarElegidas.previas?.has(l));
+  $("#urls").value = [...elegidasUrls, ...manuales.filter(l => !elegidasUrls.has(l))].join("\n");
+  sincronizarElegidas.previas = elegidasUrls;
 }
 
 function fin() {

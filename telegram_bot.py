@@ -29,6 +29,7 @@ from pathlib import Path
 
 import requests
 
+from scraper.categorias import SUPERMERCADOS, categorias_de
 from scraper.descargador import Descargador
 from scraper.servicio import comprimir_por_partes, guardar, scrapear, url_publica
 
@@ -45,6 +46,8 @@ URL_RE = re.compile(r"https?://[^\s<>\"']+")
 AYUDA = (
     "🛒 *SuperBot*\n"
     "Descargo título, descripción, precio e imágenes de productos de supermercado.\n\n"
+    "*Elegir categorías*\n"
+    "`/categorias` → eliges supermercado y categoría con botones y la descargas.\n\n"
     "*Escanear una web entera*\n"
     "`/web <enlace> [cantidad] [filtro]`\n"
     "  · `/web https://www.ahorramas.com` → 200 productos\n"
@@ -137,6 +140,7 @@ class Bot:
         self.opciones: dict[int, dict] = {}
         self.ocupado: dict[int, tuple[float, int, int]] = {}  # chat -> (inicio, id, límite en s)
         self.paradas: dict[int, threading.Event] = {}
+        self.webs: list[str] = []  # webs abiertas con /categorias (índice en los botones)
         self._siguiente_id = 0
         self.carpeta = Path(tempfile.gettempdir()) / "superbot-telegram"
         self.errores: deque[str] = deque(maxlen=10)  # se ven en /api/diagnostico
@@ -164,7 +168,10 @@ class Bot:
         if not self.permitidos:
             print("AVISO: sin TELEGRAM_USUARIOS, cualquiera puede usar el bot.")
         self.tg.llamar("setMyCommands", commands=[
-            {"command": "categoria", "description": "Productos de una categoría: /categoria <enlace> [máx]"},
+            {"command": "categorias", "description": "Elegir categorías de un supermercado"},
+            {"command": "web", "description": "Escanear una web entera: /web <enlace> [cantidad] [filtro]"},
+            {"command": "categoria", "description": "Una categoría por enlace: /categoria <enlace> [cantidad]"},
+            {"command": "parar", "description": "Detener la descarga en curso"},
             {"command": "opciones", "description": "Ver o cambiar opciones"},
             {"command": "ayuda", "description": "Cómo usar el bot"},
             {"command": "yo", "description": "Mi id de usuario"},
@@ -174,11 +181,19 @@ class Bot:
     def activar_webhook(self, url: str, secreto: str):
         """Modo servidor: Telegram envía cada mensaje a `url` (y despierta servidores dormidos)."""
         yo = self.preparar()
-        self.tg.llamar("setWebhook", url=url, secret_token=secreto, allowed_updates=["message"],
+        self.tg.llamar("setWebhook", url=url, secret_token=secreto, allowed_updates=["message", "callback_query"],
                        drop_pending_updates=False)
         print(f"Bot de Telegram @{yo['username']} activo (webhook).")
 
     def procesar(self, update: dict):
+        if cq := update.get("callback_query"):
+            chat = (cq.get("message") or {}).get("chat", {}).get("id")
+            self.ultimos_mensajes.append(f"{time.strftime('%H:%M:%S')} chat {chat}: [botón] {cq.get('data')!r}")
+            try:
+                self.pulsado(cq)
+            except Exception as e:  # noqa: BLE001
+                self.registrar_error("botón", e, chat)
+            return
         msg = update.get("message") or update.get("edited_message")
         if not msg:
             return
@@ -198,7 +213,7 @@ class Bot:
         while True:
             try:
                 updates = self.tg.llamar("getUpdates", offset=desplazamiento, timeout=50,
-                                         allowed_updates=["message"])
+                                         allowed_updates=["message", "callback_query"])
             except (requests.RequestException, RuntimeError) as e:
                 print("Error de conexión con Telegram:", e)
                 time.sleep(5)
@@ -221,6 +236,13 @@ class Bot:
             return self.tg.texto(chat, AYUDA, markdown=True)
         if comando == "/opciones":
             return self.cambiar_opciones(chat, texto)
+        if comando in ("/categorias", "/cats", "/supermercados"):
+            urls = URL_RE.findall(texto)
+            if urls:
+                if not url_publica(urls[0]):
+                    return self.tg.texto(chat, f"URL no válida: {urls[0]}")
+                return self.abrir_web(chat, urls[0])
+            return self.elegir_supermercado(chat)
         if comando in ("/parar", "/stop", "/cancelar"):
             if chat in self.ocupado and chat in self.paradas:
                 self.paradas[chat].set()
@@ -237,17 +259,8 @@ class Bot:
         if not urls:
             return self.tg.texto(chat, "Envíame un enlace de producto, o usa /web <enlace> para escanear "
                                        "una web entera. /ayuda para más info.")
-        if chat in self.ocupado:
-            inicio, _, limite = self.ocupado[chat]
-            if time.time() - inicio < limite:
-                return self.tg.texto(chat, "⏳ Todavía estoy con tu petición anterior. Espera a que termine "
-                                           "o usa /parar.")
-            self.registrar_error("trabajo", TimeoutError(
-                f"la petición anterior lleva más de {limite // 60} min; se descarta"))
-            self.tg.texto(chat, "⚠️ La petición anterior se había quedado atascada; la descarto y sigo con esta.")
-            if chat in self.paradas:
-                self.paradas[chat].set()
-            self.ocupado.pop(chat, None)
+        if self.esta_ocupado(chat):
+            return
 
         extra = {}
         limite = LIMITE_TRABAJO
@@ -278,11 +291,135 @@ class Bot:
             limite = LIMITE_ESCANEO
         else:
             args = (urls[:MAX_PRODUCTOS], [], MAX_PRODUCTOS)
+        self.lanzar(chat, args, extra, limite)
+
+    def esta_ocupado(self, chat) -> bool:
+        """True (y avisa) si el chat ya tiene una descarga en marcha."""
+        if chat not in self.ocupado:
+            return False
+        inicio, _, limite = self.ocupado[chat]
+        if time.time() - inicio < limite:
+            self.tg.texto(chat, "⏳ Todavía estoy con tu petición anterior. Espera a que termine o usa /parar.")
+            return True
+        self.registrar_error("trabajo", TimeoutError(
+            f"la petición anterior lleva más de {limite // 60} min; se descarta"))
+        self.tg.texto(chat, "⚠️ La petición anterior se había quedado atascada; la descarto y sigo con esta.")
+        if chat in self.paradas:
+            self.paradas[chat].set()
+        self.ocupado.pop(chat, None)
+        return False
+
+    def lanzar(self, chat, args, extra=None, limite=LIMITE_TRABAJO):
         self._siguiente_id += 1
         self.ocupado[chat] = (time.time(), self._siguiente_id, limite)
         self.paradas[chat] = threading.Event()
         threading.Thread(target=self.trabajo_seguro, args=(chat, self._siguiente_id, *args),
-                         kwargs=extra, daemon=True, name=f"trabajo-chat-{chat}").start()
+                         kwargs=extra or {}, daemon=True, name=f"trabajo-chat-{chat}").start()
+
+    # ---------- Selector de categorías con botones ----------
+    def _web_id(self, web: str) -> int:
+        if web not in self.webs:
+            self.webs.append(web)
+        return self.webs.index(web)
+
+    def elegir_supermercado(self, chat, msg_id=None):
+        filas = [[{"text": s["nombre"], "callback_data": f"s:{self._web_id(s['url'])}"}] for s in SUPERMERCADOS]
+        texto = ("🏪 ¿De qué supermercado quieres ver las categorías?\n\n"
+                 "Para otra web: /categorias <enlace de la web>")
+        if msg_id:
+            return self._editar_botones(chat, msg_id, texto, filas)
+        self.tg.llamar("sendMessage", chat_id=chat, text=texto, reply_markup={"inline_keyboard": filas})
+
+    def abrir_web(self, chat, web, msg_id=None):
+        aviso = "⏳ Cargando las categorías… (la primera vez tarda unos segundos)"
+        if msg_id:
+            self._editar_botones(chat, msg_id, aviso, [])
+        else:
+            msg_id = self.tg.texto(chat, aviso)["message_id"]
+        try:
+            arbol = categorias_de(web)
+        except Exception as e:  # noqa: BLE001
+            return self._editar_botones(chat, msg_id, f"❌ No pude leer las categorías: {e}", [])
+        if not arbol.nodos:
+            return self._editar_botones(chat, msg_id, "No he encontrado categorías en esa web. Prueba con "
+                                        "/categoria <enlace de una categoría>.", [])
+        self.mostrar_nodo(chat, msg_id, self._web_id(web), -1, 0)
+
+    def mostrar_nodo(self, chat, msg_id, wid: int, nid: int, pagina: int):
+        arbol = categorias_de(self.webs[wid])
+        hijos = arbol.hijos_de(None if nid < 0 else nid)
+        por_pagina = 12
+        trozo = hijos[pagina * por_pagina:(pagina + 1) * por_pagina]
+        nombre_web = next((s["nombre"] for s in SUPERMERCADOS if s["url"] == self.webs[wid]),
+                          self.webs[wid].split("/")[2])
+        filas = []
+        if nid >= 0:
+            nodo = arbol.nodos[nid]
+            urls = arbol.urls_de(nid)
+            if urls:
+                filas.append([{"text": "⬇ Descargar (200)", "callback_data": f"d:{wid}:{nid}:200"},
+                              {"text": "⬇ Todos", "callback_data": f"d:{wid}:{nid}:0"}])
+            texto = f"🗂 {nombre_web} › {arbol.ruta(nid)}"
+            texto += (f"\n\n{len(hijos)} subcategorías. Elige una o descarga esta entera."
+                      if hijos else "\n\nPulsa «Descargar» para bajar sus productos.")
+        else:
+            texto = f"🗂 {nombre_web}: elige una categoría ({len(hijos)})"
+        for h in trozo:
+            etiqueta = h.nombre[:40] + (f" ({len(h.hijos)}) ›" if h.hijos else "")
+            filas.append([{"text": etiqueta, "callback_data": f"n:{wid}:{h.id}:0"}])
+        nav = []
+        if pagina > 0:
+            nav.append({"text": "◀ Anteriores", "callback_data": f"n:{wid}:{nid}:{pagina - 1}"})
+        if (pagina + 1) * por_pagina < len(hijos):
+            nav.append({"text": f"Más ▶ ({pagina + 2}/{-(-len(hijos) // por_pagina)})",
+                        "callback_data": f"n:{wid}:{nid}:{pagina + 1}"})
+        if nav:
+            filas.append(nav)
+        if nid >= 0:
+            padre = arbol.nodos[nid].padre
+            filas.append([{"text": "⬅ Volver", "callback_data": f"n:{wid}:{-1 if padre is None else padre}:0"}])
+        else:
+            filas.append([{"text": "⬅ Supermercados", "callback_data": "s:-1"}])
+        self._editar_botones(chat, msg_id, texto, filas)
+
+    def _editar_botones(self, chat, msg_id, texto, filas):
+        try:
+            self.tg.llamar("editMessageText", chat_id=chat, message_id=msg_id, text=texto[:4000],
+                           reply_markup={"inline_keyboard": filas})
+        except RuntimeError as e:
+            if "not modified" not in str(e):
+                raise
+
+    def pulsado(self, cq: dict):
+        chat = cq["message"]["chat"]["id"]
+        msg_id = cq["message"]["message_id"]
+        usuario = cq.get("from", {}).get("id")
+        try:
+            self.tg.llamar("answerCallbackQuery", callback_query_id=cq["id"])
+        except Exception:  # noqa: BLE001
+            pass
+        if self.permitidos and usuario not in self.permitidos:
+            return self.tg.texto(chat, f"⛔ No tienes permiso para usar este bot. (Tu id: {usuario})")
+        partes = (cq.get("data") or "").split(":")
+        tipo = partes[0]
+        if tipo == "s":
+            wid = int(partes[1])
+            if wid < 0 or wid >= len(self.webs):
+                return self.elegir_supermercado(chat, msg_id)
+            return self.abrir_web(chat, self.webs[wid], msg_id)
+        if tipo in ("n", "d") and len(partes) == 4:
+            wid, nid, n = int(partes[1]), int(partes[2]), int(partes[3])
+            if wid >= len(self.webs):  # el servidor se reinició: se perdió la lista
+                return self._editar_botones(chat, msg_id, "Esta lista ha caducado. Vuelve a usar /categorias.", [])
+            if tipo == "n":
+                return self.mostrar_nodo(chat, msg_id, wid, nid, n)
+            arbol = categorias_de(self.webs[wid])
+            urls = arbol.urls_de(nid)
+            if not urls or self.esta_ocupado(chat):
+                return
+            maximo = MAX_ESCANEO if n == 0 else n
+            self.tg.texto(chat, f"⬇ Descargando «{arbol.ruta(nid)}»" + (" (todos)" if n == 0 else f" (hasta {n})"))
+            self.lanzar(chat, ([], urls, maximo), None, LIMITE_ESCANEO)
 
     def trabajo_seguro(self, chat, tid, *args, **kwargs):
         try:

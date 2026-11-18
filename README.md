@@ -105,6 +105,7 @@ producto, y al final un ZIP con imágenes, CSV y JSON. Funciona en cualquier mó
 **Comandos**
 | Mensaje | Qué hace |
 |---|---|
+| `/categorias` | **Elegir categorías con botones**: supermercado → categoría → subcategoría → «⬇ Descargar» |
 | `/web <enlace> [cantidad] [filtro]` | **Escanea la web entera** y descarga sus productos (200 por defecto; `todos` = hasta 5000). Ej.: `/web https://www.ahorramas.com todos leche` |
 | `/parar` | Detiene el escaneo y envía lo descargado hasta ese momento |
 | un enlace (o varios) | Descarga esos productos |
@@ -150,6 +151,12 @@ Si el servidor se reinicia (por ejemplo, al desplegar una versión nueva), el es
 curso se pierde.
 
 Variables: `BOT_MAX_ESCANEO` (máximo por escaneo, 5000), `BOT_LIMITE_ESCANEO` (segundos, 8 h).
+
+## Selector de categorías
+En la app (pestaña **Categoría**) y en Telegram (`/categorias`) eliges el supermercado y navegas
+por sus categorías y subcategorías, o las buscas por nombre, sin copiar enlaces. La lista sale
+del sitemap de categorías de la web (Ahorramas, Alcampo) o de su menú (Lidl), y se guarda
+6 horas. También vale «Otra web…» con cualquier supermercado.
 
 ## Descargar categorías completas
 Las webs no enseñan una categoría entera de golpe: la muestran por páginas, con «cargar más»
